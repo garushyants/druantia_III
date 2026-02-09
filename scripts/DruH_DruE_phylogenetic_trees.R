@@ -46,9 +46,83 @@ DruH3BootstrapValues<-get.data(DruH3tree)
 DruH3BootstrapValuesA80<-subset(DruH3BootstrapValues,
                                 DruH3BootstrapValues$UFboot >= 80)
 ##############################
+###MMseqs clusters
+DruE3MMseqs<-read.csv("./data/mmseqs/DruE3_mmseqs98_cluster.withref.tsv", sep ="\t", header = F)
+DruH3MMseqs<-read.csv("./data/mmseqs/DruH3_mmseqs98_cluster.withref.tsv", sep ="\t", header = F)
+MMseqs<-rbind(DruE3MMseqs,DruH3MMseqs)
+names(MMseqs)<-c("TreeRepresentative","ProteinID")
+###Read PADLOC data
+DruE3PADLOC<-read.csv("./data/DruE3_padloc20_refseq.nopseudo.cutoff07.withDruH.csv",header = F)
+DruH3PADLOC<-read.csv("./data/DruH3_padloc20_refseq.nopseudo.cutoff07.csv",header = F)
+#
+TransformPADLOCdata<-function(df){
+  df$RefseqID<-sub("\\.csv.*", "", df$V1)
+  dfessential<-df[,c(4,20,2,7,6,12:14)]
+  names(dfessential)<-c("ProteinID","RefseqID","Contig","Protein","PADLOC_HMM","Start","End","Strand")
+  return(dfessential)
+}
+#get simple data
+DruE3PADLOCEssential<-TransformPADLOCdata(DruE3PADLOC)
+DruH3PADLOCEssential<-TransformPADLOCdata(DruH3PADLOC)
+PADLOCEssential<-rbind(DruE3PADLOCEssential,DruH3PADLOCEssential)
+####################
+###Assembly summary
+AssemblySummary<-read.csv("./data/DruE3_assembly_summary_refseq_20250415.txt", sep="\t", header =F)
+AssemblySummaryEssential<-AssemblySummary[,c(1,7,8,9,12)]
+names(AssemblySummaryEssential)<-c("RefseqID","Taxid",
+                                   "Name",
+                                   "Strain","AssemblyStatus")
+###Taxonomic information
+TaxPath<-"./data/taxonomy_info_datasets/"
+TaxselectedFiles<-list.files(pattern="\\.tsv$",
+                              path = TaxPath)
+setwd(paste0(mainpath,"/",TaxPath))
+Taxdata<-readr::read_tsv(TaxselectedFiles, id="file_name")
+
+setwd(mainpath)
+TaxdataEssential<-unique(Taxdata[,c(2,11,12,14,16,18,20,22,24,26)])
+names(TaxdataEssential)[1]<-"Taxid"
+###Merge PADLOCdata with genome info 
+PADLOCWithGenomeInfo<-merge(PADLOCEssential,AssemblySummaryEssential,
+      by="RefseqID",
+      all.x =T)
+###Add full taxonomy
+PADLOCwithTaxonomy<-merge(PADLOCWithGenomeInfo,
+                          TaxdataEssential,
+                          by="Taxid",
+                          all.x = T)
+###Add MMseqs info
+DruantiaTaxMMseqs<-merge(PADLOCwithTaxonomy,
+                         MMseqs,
+                         by="ProteinID",
+                         all.x = T)
+###Representative genomes
+RepresentativeGenomes<-read.csv("./data/Dru3_representative_genomes.txt", header=F)
+names(RepresentativeGenomes)<-"RefseqID"
+RepresentativeGenomes$representative_genome<-rep("Y",length(RepresentativeGenomes$RefseqID))
+###
+DruantiaTaxMMseqsRep<-merge(DruantiaTaxMMseqs,RepresentativeGenomes,
+                            by ="RefseqID",
+                            all.x =T)
+##############################
 #Read in the data on the clusters
 DruE3CladesAssignments<-read.csv("./data/phylogenetic_trees/DruE3_med_clade_3_final_clades.tsv", sep="\t")
 DruH3CladesAssignments<-read.csv("./data/phylogenetic_trees/DruH3_med_clade_2.4_final_clades.tsv", sep="\t")
+
+CladesAssignments<-rbind(DruE3CladesAssignments,
+                         DruH3CladesAssignments)
+##################################################################
+##Dataframe with main information about the whole Druantia dataset
+DruantiaAllInfo<-merge(DruantiaTaxMMseqsRep,
+                       CladesAssignments,
+                       by.x = "TreeRepresentative",
+                       by.y = "Sequence",
+                       all.x = T)
+####Save info to file
+write.table(DruantiaAllInfo, file = "./data/Supplementary_table_1_dataset_info.tsv",
+            row.names = F, sep="\t", quote =F)
+##################################################################
+##
 
 GetNodesOfInterest<-function(Df, tree)
 {
@@ -72,7 +146,7 @@ myclustercolors<-c("#a6cee3","#1f78b4","#b2df8a",
                    "#00441b","#dfc27d","#4d4d4d")
 names(myclustercolors)<-unique(DruE3ClusterAncestryNodeOfInterest$Cluster)
 
-##Draw simple tree with clusters
+##Draw DruE tree with clusters
 
 DruE3BasicTreePlot<-ggtree(DruE3TreeMidRoot,layout = 'circular', open.angle=40, 
                            size=0.2,
@@ -91,6 +165,11 @@ DruE3TreeWithCladesSimple<-DruE3BasicTreePlot +
                extend=.05)+
   scale_fill_manual(values=myclustercolors,name="Cluster")
 DruE3TreeWithCladesSimple
+
+#########################
+###
+
+
 
 
 
