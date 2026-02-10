@@ -17,10 +17,10 @@ library(this.path)
 mainpath<-paste0(dirname(this.path()),"/../")
 setwd(mainpath)
 
-FigDir<-"figures"
+FigDir<-"figures/phylogenetic_trees"
 
 if (!dir.exists(FigDir)){
-  dir.create(FigDir)
+  dir.create(FigDir,recursive = TRUE)
 } else {
   print("Directory already exists!")
 }
@@ -111,18 +111,109 @@ DruH3CladesAssignments<-read.csv("./data/phylogenetic_trees/DruH3_med_clade_2.4_
 
 CladesAssignments<-rbind(DruE3CladesAssignments,
                          DruH3CladesAssignments)
-##################################################################
-##Dataframe with main information about the whole Druantia dataset
+
 DruantiaAllInfo<-merge(DruantiaTaxMMseqsRep,
                        CladesAssignments,
                        by.x = "TreeRepresentative",
                        by.y = "Sequence",
                        all.x = T)
-####Save info to file
-write.table(DruantiaAllInfo, file = "./data/Supplementary_table_1_dataset_info.tsv",
-            row.names = F, sep="\t", quote =F)
 ##################################################################
-##
+##Read Genomad output 
+##Plasmids
+pathtogenomadfolder<-"./data/genomad_output/"
+filelistgenomadplasmid = list.files(pattern="\\plasmid_summary.tsv$",
+                                    recursive = T,
+                                    path = pathtogenomadfolder)
+setwd(paste0(mainpath,"/",pathtogenomadfolder))
+GenomadResultsPlasmids<-readr::read_tsv(filelistgenomadplasmid, id="file_name")
+setwd(mainpath)
+GenomadResultsPlasmids<-separate(data =  GenomadResultsPlasmids,
+                                 col = file_name,
+                                 into=c("RefseqID",NA,NA),
+                                 sep="/")
+colnames(GenomadResultsPlasmids)[2]<-"Contig"
+GenomadPlasmidsSimple<-GenomadResultsPlasmids[c(1,2,7)]
+#get Plasmids in data
+GenomadPlasmidsSimpleIndata<-subset(GenomadPlasmidsSimple,
+                                    GenomadPlasmidsSimple$RefseqID %in% DruantiaAllInfo$RefseqID &
+                                      GenomadPlasmidsSimple$Contig %in% DruantiaAllInfo$Contig)
+# 
+# DruWithGenomadPlasmid<-merge(DruE3padlocDfWithClRepr,
+#                              GenomadResultsPlasmids,
+#                              by.x= c("GenomeID","V2"),
+#                              by.y= c("GenomeID","ID"),
+#                              all.x =T)
+# nrow(subset(DruWithGenomadPlasmid, !is.na(DruWithGenomadPlasmid$length)))
+# DruGenomadPlSh<-DruWithGenomadPlasmid[,c(1:3,5,8,23,27)]
+# colnames(DruGenomadPlSh)[7]<-"GenomadPlasmidScore"
+
+######
+#extracting phage info
+filelistgenomadvirus = list.files(pattern="\\virus_summary.tsv$",
+                                  recursive = T,
+                                  path = pathtogenomadfolder)
+setwd(paste0(mainpath,"/",pathtogenomadfolder))
+GenomadResultsViruses<-readr::read_tsv(filelistgenomadvirus, id="file_name")
+setwd(mainpath)
+
+GenomadResultsViruses<-separate(data = GenomadResultsViruses,
+                                col = file_name,
+                                into=c("RefseqID",NA,NA),
+                                sep="/")
+GenomadResultsViruses<-separate(data = GenomadResultsViruses,
+                                col = seq_name,
+                                into=c("Contig","Provirus"),
+                                sep="\\|", remove = F)
+GenomadResultsViruses<-separate(data = GenomadResultsViruses,
+                                col = coordinates,
+                                into=c("Start","End"),
+                                sep="\\-")
+
+GenomadResultsViruses$Start<-as.integer(GenomadResultsViruses$Start)
+GenomadResultsViruses$End<-as.integer(GenomadResultsViruses$End)
+#add coordinates where prophage is a whole contig
+GenomadResultsViruses$Start<-ifelse(is.na(GenomadResultsViruses$Start),
+                                    1,
+                                    GenomadResultsViruses$Start)
+GenomadResultsViruses$End<-ifelse(is.na(GenomadResultsViruses$End),
+                                  as.integer(GenomadResultsViruses$length),
+                                  GenomadResultsViruses$End)
+
+GenomadResultsVirusesCons<-subset(GenomadResultsViruses,
+                                  GenomadResultsViruses$virus_score > .8)
+##now get intersection with data
+
+PreGenomadVirusesInDru<-merge(GenomadResultsVirusesCons,
+                                     DruantiaAllInfo[,c(1,2,3,5,8:10)], by =c("RefseqID","Contig"))
+
+PreGenomadVirusesInDru$InProphage<-ifelse((PreGenomadVirusesInDru$Start.y >= PreGenomadVirusesInDru$Start.x) & 
+                                                   (PreGenomadVirusesInDru$End.y <= PreGenomadVirusesInDru$End.x) &
+                                                   (PreGenomadVirusesInDru$Start.y <= PreGenomadVirusesInDru$End.x) & 
+                                                   (PreGenomadVirusesInDru$End.y >= PreGenomadVirusesInDru$Start.x),
+                                                 1,0)
+
+GenomadVirusesOnDruContigs<-subset(PreGenomadVirusesInDru,
+                                   InProphage == 1)
+GenomadVirusesSimple<-GenomadVirusesOnDruContigs[,c(1,2,16,11)]
+
+
+###################################################
+###Add MGE data to the main dataset
+DruantiaAllWithPlasmids<-merge(DruantiaAllInfo,
+                               GenomadPlasmidsSimpleIndata,
+                               by = c("RefseqID","Contig"),
+                               all.x =T)
+DruantiaAllWithMGE<-merge(DruantiaAllWithPlasmids,
+                          GenomadVirusesSimple,
+                          by = c("RefseqID","Contig","TreeRepresentative"),
+                          all.x = T)
+
+# ####Save all metadata about dataset to file
+# write.table(DruantiaAllWithMGE, file = "./data/Supplementary_table_1_dataset_info.tsv",
+#             row.names = F, sep="\t", quote =F)
+##################################################################
+
+####Getting nodes for clusters for later vizualization
 
 GetNodesOfInterest<-function(Df, tree)
 {
@@ -146,566 +237,260 @@ myclustercolors<-c("#a6cee3","#1f78b4","#b2df8a",
                    "#00441b","#dfc27d","#4d4d4d")
 names(myclustercolors)<-unique(DruE3ClusterAncestryNodeOfInterest$Cluster)
 
-##Draw DruE tree with clusters
 
-DruE3BasicTreePlot<-ggtree(DruE3TreeMidRoot,layout = 'circular', open.angle=40, 
-                           size=0.2,
-                           color="#636363")%<+% DruE3BootstrapValuesA80 +
-  geom_nodepoint(aes(size = UFboot),
-                 color = '#4292c6',
-                 alpha=.3)+
-  scale_size_continuous(range = c(0.01,1))+
-  geom_treescale(y=1, x=3, fontsize=3, linesize=0.7, offset=1)
-DruE3BasicTreePlot
-DruE3TreeWithCladesSimple<-DruE3BasicTreePlot +
+DrawCircularTreeWithData<-function(tree,clusternodes, bootstraps)
+{
+  #tree<-DruE3TreeMidRoot
+  #clusternodes<-DruE3ClusterAncestryNodeOfInterest
+  #bootstraps<- DruE3BootstrapValuesA80
+  BasicTreePlot<-ggtree(tree,layout = 'fan', open.angle=10, 
+                    size=0.2,
+                    color="#636363")%<+% bootstraps +
+    geom_nodepoint(aes(size = UFboot),
+                   color = '#4292c6',
+                   alpha=.3)+
+    scale_size_continuous(range = c(0.01,1))+
+    geom_treescale(y=1, x=3.2, fontsize=3, linesize=0.7, offset=1)
+  TreeWithCladesSimple<-BasicTreePlot +
+    geom_hilight(data = clusternodes,
+                 mapping = aes(node=ClMRCA,
+                               fill = as.factor(Cluster)),
+                 alpha=0.2,
+                 extend=.05)+
+    scale_fill_manual(values=myclustercolors,name="Cluster")
+  ##metadata for the tree
+  Metadata<-subset(DruantiaAllWithMGE,
+                   DruantiaAllWithMGE$TreeRepresentative %in% tree$tip.label)
+  #############MGE data
+  MGEdata<-subset(Metadata[,c("TreeRepresentative",
+                              "plasmid_score",
+                              "virus_score")],
+                  !(is.na(Metadata$plasmid_score) &
+                      is.na(Metadata$virus_score))
+                  )
+  MGEdata$Location<-ifelse(!is.na(MGEdata$virus_score),
+                           "prohage",
+                           "plasmid")
+  ########################################
+  ##get taxonomy for outer circles
+  CommonGenusInSet<-Metadata %>% group_by(`Genus name`) %>%
+    count()
+  CommonGenusInSet<-CommonGenusInSet[order(-CommonGenusInSet$n),]
+  
+  sum(pull(CommonGenusInSet[c(1:12),2]))/length(Metadata$ProteinID)
+  #I am taking 12 most common genus, because they together account for ~92% of all genomes, and tmn there found at least in >50 genomes per genus
+  GenusToKeep<-c(pull(CommonGenusInSet[c(1:12),1]))
+  Metadata$TopGenus<-ifelse(Metadata$`Genus name` %in% GenusToKeep,
+                              Metadata$`Genus name`, "Other")
+  
+  HitsCountsPerLeaf<-Metadata %>%
+    group_by(TreeRepresentative)%>%
+    count()
+  #transform to log10
+  HitsCountsPerLeaf$logCount<-log10(HitsCountsPerLeaf$n)+.1
+  
+  TaxonomyCountsPerLeaf<-Metadata %>%
+    group_by(TreeRepresentative, TopGenus) %>% 
+    count(TopGenus) %>%
+    group_by(TreeRepresentative) %>%
+    mutate(percent = n / sum(n) * 100)
+  TaxonomyCountsPerLeaf$TopGenus<-factor(TaxonomyCountsPerLeaf$TopGenus,
+                                         levels=c(GenusToKeep,"Other"))
+  
+  CommonClassInSet<-Metadata %>% group_by(`Class name`) %>%
+    count()%>%
+    arrange(desc(n))
+  ClassDf<-Metadata[,c("TreeRepresentative","Class name")]
+  ClassDf$CommonClass<-ifelse(ClassDf$`Class name` %in% CommonClassInSet$`Class name`[1:5],
+                              ClassDf$`Class name`,
+                              "Other")
+  #I pick all Classes with > 15 genomes
+  ClassCountsPerLeaf<-ClassDf %>%
+    group_by(TreeRepresentative, CommonClass) %>% 
+    count(CommonClass) %>%
+    group_by(TreeRepresentative) %>%
+    mutate(percent = n / sum(n) * 100)
+  unique(ClassCountsPerLeaf$CommonClass)
+  ClassCountsPerLeaf$CommonClass<-factor(ClassCountsPerLeaf$CommonClass,
+                                         levels=c(CommonClassInSet$`Class name`[1:5],
+                                                  "Other"))
+  ########################################
+  #create colors
+  genuscolors<-c("#e31a1c","#33a02c","#1f78b4","#6a3d9a",
+                 "#ff7f00","#b15928","#ffff99","#fb9a99",
+                 "#fdbf6f","#b2df8a","#a6cee3","#cab2d6", "#d9d9d9")
+  names(genuscolors)<-c(GenusToKeep,"Other")
+  
+  classcolors<-c("#fbb4ae","#b3cde3","#ccebc5",
+                 "#decbe4","#fed9a6","#d9d9d9")
+  names(classcolors)<-c(CommonClassInSet$`Class name`[1:5],"Other")
+  #########################################
+  ####Vizualize all the info
+  TreeWithMGE<-TreeWithCladesSimple +
+    new_scale_fill()+
+    geom_fruit(data=MGEdata,
+               geom = geom_tile,
+               mapping = aes(y=TreeRepresentative, x= Location,
+                             fill = as.character(Location)),
+               color="#bdbdbd",
+               pwidth=.04,
+               offset = 0.1,
+               axis.params=list(axis="x",
+                                text.size=2,
+                                text.angle=60,
+                                vjust=0,
+                                hjust=1))+
+    scale_fill_manual(values=c("#238443","#0570b0"), guide="none", na.value = "#ffffff")
+  TreeWithMGEAndTax<-TreeWithMGE +
+    new_scale_fill()+
+    scale_fill_manual(values=c("#b2182b","#9ecae1"), name = "Domain")+
+    guides(fill = guide_legend(nrow = 3))+
+    new_scale_fill()+
+    geom_fruit(data=ClassCountsPerLeaf,
+               geom = geom_col,
+               mapping = aes(y=TreeRepresentative,
+                             fill = CommonClass,
+                             x = percent),
+               offset =0.01, pwidth =.02)+
+    scale_fill_manual(values=classcolors, name = "Class")+
+    guides(fill = guide_legend(nrow = 4))+
+    new_scale_fill()+
+    geom_fruit(data=TaxonomyCountsPerLeaf,
+               geom = geom_col,
+               mapping = aes(y=TreeRepresentative,
+                             fill = TopGenus,
+                             x = percent),
+               offset =0.01, pwidth =.1)+
+    scale_fill_manual(values=genuscolors, name = "Genus")+
+    guides(fill = guide_legend(nrow = 4))
+  
+  MainTreeToSave<-TreeWithMGEAndTax +
+    geom_fruit(data = HitsCountsPerLeaf,
+               geom = geom_col,
+               mapping = aes(y=TreeRepresentative,
+                             x=logCount), fill= "#878787",
+               pwidth =.4,
+               axis.params=list(axis="x",
+                                text.size=3,
+                                line.size=.3),
+               grid.params = list(size=.3,
+                                  alpha=.3))+
+    theme(legend.position = "bottom")
+  return(MainTreeToSave)
+}
+################################
+#####Draw circular tree plots
+DruE3CircularPlot<-DrawCircularTreeWithData(DruE3TreeMidRoot,
+                                            DruE3ClusterAncestryNodeOfInterest,
+                                            DruE3BootstrapValuesA80)
+DruH3CircularPlot<-DrawCircularTreeWithData(DruH3TreeMidRoot,
+                                            DruH3ClusterAncestryNodeOfInterest,
+                                            DruH3BootstrapValuesA80)
+####save circular plots
+ggsave("DruE_tree_with_MGE_and_Tax.pdf",
+       plot=DruE3CircularPlot,
+       path=FigDir,
+       width=30,
+       height=30,
+       dpi=300,
+       units="cm")
+
+ggsave("DruH_tree_with_MGE_and_Tax.pdf",
+       plot=DruH3CircularPlot,
+       path=FigDir,
+       width=30,
+       height=30,
+       dpi=300,
+       units="cm")
+
+
+#########################################
+#########################################
+###Draw interactions between DruE and DruH
+
+InfoSubset<-DruantiaAllInfo[,c("RefseqID","Contig","Protein",
+                   "TreeRepresentative")]
+DruEInfoSubset<-subset(InfoSubset, InfoSubset$Protein == "DruE3")
+DruHInfoSubset<-subset(InfoSubset, InfoSubset$Protein == "DruH3")
+
+DruParallel<-merge(DruEInfoSubset,
+                   DruHInfoSubset,
+                   by = c("RefseqID","Contig"))
+names(DruParallel)[c(4,6)]<-c("druE","druH")
+#get all unique pairs
+DruAlluniquepairs<-unique(DruParallel[c(4,6)])
+DruAlluniquepairs$group<-seq(1,length(DruAlluniquepairs$druE))
+DruAllpairslong<-DruAlluniquepairs %>%
+  pivot_longer(cols = starts_with("dru"),
+               names_to = "gene",
+               values_to= "label")
+
+#Draw basic trees
+#DruE
+DruETree<-ggtree(DruE3TreeMidRoot,
+                 size=0.2,
+                 color="#636363")
+
+DruETreeWithCl<-DruETree +
   geom_hilight(data = DruE3ClusterAncestryNodeOfInterest,
                mapping = aes(node=ClMRCA,
                              fill = as.factor(Cluster)),
-               alpha=0.2,
-               extend=.05)+
+               alpha=0.2)+
   scale_fill_manual(values=myclustercolors,name="Cluster")
-DruE3TreeWithCladesSimple
+DruETreeWithCl
 
-#########################
-###
-
-
-
-
-
-
-
-
-
-
-
-
-##Test clades assignment from TreeCluster and pick the best set
-
-DruE3CladesMed<-read.csv("../20250717_DruE_DruH_treecluster/DruE3_treecluster/DruE3_treecluster_med_clade_3",
-                         sep="\t", header=T)
-#This version contains 16 clusters, but let's look at them more accurately
-############
-#Drawing basic DruE3 tree
-DruE3BasicTreePlot<-ggtree(DruE3TreeMidRoot,layout = 'circular', open.angle=40, 
-                           size=0.2,
-                           color="#636363")%<+% DruE3BootstrapValuesA80 +
+#DruH
+DruHTree<-ggtree(DruH3TreeMidRoot,
+                 size=0.2,
+                 color="#636363") +
   geom_nodepoint(aes(size = UFboot),
                  color = '#4292c6',
                  alpha=.3)+
-  scale_size_continuous(range = c(0.01,1))+
-  geom_treescale(y=1, x=3, fontsize=3, linesize=0.7, offset=1)
-DruE3BasicTreePlot
+  scale_size_continuous(range = c(0.01,1))
 
-####Adding tippoint with clusters to understand what have to be merged
-ClNum<-length(unique(DruE3CladesMed$ClusterNumber))
-colors <- distinctColorPalette(ClNum)
-DruE3BasicTreePlot %<+% DruE3CladesMed +
-  geom_tippoint(aes(color=as.factor(ClusterNumber)), size=2) +
-  scale_color_manual(values=colors)
-#Actually this med clustering looks reasonable, aside for one clade with not very good support
-#And clade 6 here include two additinal ones that have to be put in the separate clusters because they are separate on DruH tree
-TempTreeWithInternalNodes<-ggtree(DruE3tree@phylo, 
-       size=0.2,
-       color="#636363") %<+% DruE3tree@data +
-  geom_text2(aes(subset = !isTip, label = node), hjust = -0.3, size=2)
-TempTreeWithInternalNodes
-ggsave("DruE3_temp_internal_nodes.png", plot = TempTreeWithInternalNodes,
-       path =FigDir, height=35, width =10, units="cm",dpi=300)
-###From that I know
-##Cluster 6 in this initial assignment has to be split in 3 with mrca:968,1057,1081
-cluster2nodes<-c(968,1057,1081)
-names(cluster2nodes)<-c(2,3,4)
-Cluster2RestructuredDf<- lapply(cluster2nodes, function(n) {
-  subtree <- extract.clade(DruE3TreeMidRoot, node = n)
-  tips <- subtree$tip.label   # get tip numbers
-  data.frame(
-    ClAdj = rep(names(cluster2nodes)[cluster2nodes == n],length(tips)),
-    SequenceName =tips,
-    stringsAsFactors = FALSE
-  )
-}) %>% bind_rows()
-#I want to merge -1,1-5 into one cluster and then it seems like a reasonable assignment
-DruE3CladesMedF<-merge(DruE3CladesMed,Cluster2RestructuredDf,by="SequenceName", all=T)
-
-DruE3CladesMedF$ClNumAdj<-ifelse(DruE3CladesMedF$ClusterNumber < 6, 1,
-                                ifelse(DruE3CladesMedF$ClusterNumber == 6,
-                                       as.integer(DruE3CladesMedF$ClAdj),
-                                       DruE3CladesMedF$ClusterNumber-2))
-##I get 15 clusters out of it that all seems reasonable
-#Saving final clusters to a file
-EClustToSave<-DruE3CladesMedF[,c(1,4)]
-names(EClustToSave)<-c("Sequence","Cluster")
-EClustToSave<-EClustToSave[order(EClustToSave$Cluster),]
-write.table(EClustToSave,
-            file = "../20250717_DruE_DruH_treecluster/DruE3_med_clade_3_final_clades.tsv",
-            sep="\t",
-            quote = F,
-            row.names = F)
-##
-
-myclustercolors<-c("#a6cee3","#1f78b4","#b2df8a",
-                   "#33a02c","#fb9a99","#e31a1c",
-                   "#fdbf6f","#ff7f00","#cab2d6",
-                   "#6a3d9a","#ffff99","#8c510a",
-                   "#00441b","#4d4d4d","#dfc27d")
-names(myclustercolors)<-unique(DruE3CladesMedF$ClNumAdj)
-
-##get common ancestors for all clusters so I can do the blocks on the tree
-
-#getting the common ancestor
-DruE3ClusterAncestryNodeOfInterest<-DruE3CladesMedF %>% group_by(ClNumAdj) %>%
-  summarise(ClMRCA=getMRCA(DruE3TreeMidRoot, SequenceName))
-##
-#do the grouping to color the branches
-DruE3TreeWithCladesSimple<-DruE3BasicTreePlot +
-  geom_hilight(data = DruE3ClusterAncestryNodeOfInterest,
-               mapping = aes(node=ClMRCA,
-                             fill = as.factor(ClNumAdj)),
-               alpha=0.2,
-               extend=.05)+
-  scale_fill_manual(values=myclustercolors,name="Cluster")
-DruE3TreeWithCladesSimple
-ggsave(filename="DruE3_15_clades_simple_tree.png",
-       plot=DruE3TreeWithCladesSimple,
-       path=FigDir,
-       dpi=300,
-       width = 35,
-       height =35,
-       units = "cm")
-
-#####Now do the the same for the DruH3 clusters
-DruH3CladesMed<-read.csv("../20250717_DruE_DruH_treecluster/DruH3_treecluster/DruH3_treecluster_med_clade_2.4",
-                         sep="\t", header=T)
-###There are problems with this clustering because I miss the stem of of DruE 14 and the whole DruE 8,
-###because some of the sequences are assigned as singletons
-###Do the same procedure as above for DruE
-HTempTreeWithInternalNodes<-ggtree(DruH3tree@phylo, 
-                                  size=0.2,
-                                  color="#636363") %<+% DruE3tree@data +
-  geom_text2(aes(subset = !isTip, label = node), hjust = -0.3, size=2)
-HTempTreeWithInternalNodes
-###
-##cluster 14 is node 600
-##cluster 8 is 1065
-##cluster 13 is 583
-##I am alos adding 15 so it will be easy to get rid of singletons
-Hcluster2nodes<-c(601,1065,583,746)
-names(Hcluster2nodes)<-c(54,48,43,45)
-HCluster2RestructuredDf<- lapply(Hcluster2nodes, function(n) {
-  subtree <- extract.clade(DruH3TreeMidRoot, node = n)
-  tips <- subtree$tip.label   # get tip numbers
-  data.frame(
-    ClAdj = rep(names(Hcluster2nodes)[Hcluster2nodes == n],length(tips)),
-    SequenceName =tips,
-    stringsAsFactors = FALSE
-  )
-}) %>% bind_rows()
-DruH3CladesMedF<-merge(DruH3CladesMed,HCluster2RestructuredDf,by="SequenceName", all=T)
-###################
-DruH3CladesMedF$ClNumAdj<-ifelse(is.na(DruH3CladesMedF$ClAdj),
-                                 ifelse(DruH3CladesMedF$ClusterNumber %in% c(27,28),27,#5
-                                        #ifelse(DruH3CladesMedF$ClusterNumber %in% c(1,2,3), 1,#13
-                                        #ifelse(DruH3CladesMedF$ClusterNumber %in% c(14,20,19,15,25,24,21), 14,#14
-                                        ifelse(DruH3CladesMedF$ClusterNumber %in% c(22,11,17,16), 11,#15
-                                               ifelse(DruH3CladesMedF$ClusterNumber %in% c(6,9,10), 6,#9
-                                                      DruH3CladesMedF$ClusterNumber))), DruH3CladesMedF$ClAdj)
-##Renumbering clusters so they would match the corresponding ones in DruE3
-ClDruH3DF<-data.frame(DruH3ClustOld = c(13,18,26,23,27,12,8,48,6,4,7,5,43,54,45),
-                      DruE3Clust = seq(1:15))
-
-DruH3CladesMedFi<-merge(DruH3CladesMedF,ClDruH3DF, by.x="ClNumAdj", by.y = "DruH3ClustOld", all.x = T)
-#After that I get 15 clusters as expected
-##Saving final list to a file
-HClustToSave<-DruH3CladesMedFi[,c(2,5)]
-names(HClustToSave)<-c("Sequence","Cluster")
-HClustToSave<-HClustToSave[order(HClustToSave$Cluster),]
-write.table(HClustToSave,
-            file = "../20250717_DruE_DruH_treecluster/DruH3_med_clade_2.4_final_clades.tsv",
-            sep="\t",
-            quote = F,
-            row.names = F)
-##Get MRCAs for DruH3
-DruH3ClusterAncestryNodeOfInterest<-DruH3CladesMedFi %>% group_by(DruE3Clust) %>%
-  summarise(ClMRCA=getMRCA(DruH3TreeMidRoot, SequenceName))
-DruH3ClusterAncestryNodeOfInterest<-subset(DruH3ClusterAncestryNodeOfInterest,!is.na(DruH3ClusterAncestryNodeOfInterest$DruE3Clust))
-DruH3BasicTreePlot<-ggtree(DruH3TreeMidRoot,layout = 'circular', open.angle=40, 
-                           size=0.2,
-                           color="#636363")%<+% DruH3BootstrapValuesA80 +
-  geom_nodepoint(aes(size = UFboot),
-                 color = '#4292c6',
-                 alpha=.3)+
-  scale_size_continuous(range = c(0.01,1))+
-  geom_treescale(y=1, x=3, fontsize=3, linesize=0.7, offset=1)
-
-DruH3TreeWithCladesSimple<-DruH3BasicTreePlot +
-  geom_hilight(data = DruH3ClusterAncestryNodeOfInterest,
-               mapping = aes(node=ClMRCA,fill = as.factor(DruE3Clust)),
-               alpha=0.2,
-               extend=.05)+
-  scale_fill_manual(values=myclustercolors,name="Cluster")
-DruH3TreeWithCladesSimple
-
-##save plot
-ggsave(filename="DruH3_15_clades_simple_tree.png",
-       plot=DruH3TreeWithCladesSimple,
-       path=FigDir,
-       dpi=300,
-       width = 35,
-       height =35,
-       units = "cm")
-##############################
-##############################
-
-##############################
-#########Get metadata
-
-##Read padloc data for genome counts
-DruH3padlocDf<-read.csv("./DruH3_padloc20_refseq.nopseudo.cutoff07.csv",
-                   header=F)
-DruE3padlocDf<-read.csv("./DruE3_padloc20_refseq.nopseudo.cutoff07.withDruH.csv",
-                        header=F)
-#adjust genome IDs
-DruH3padlocDf$GenomeID<-sapply(strsplit(DruH3padlocDf$V1, ".csv:", fixed=TRUE), 
-                                       head, 1)
-DruE3padlocDf$GenomeID<-sapply(strsplit(DruE3padlocDf$V1, ".csv:", fixed=TRUE), 
-                               head, 1)
-##get info on clusters
-DruH3Clusters<-read.csv("./DruH3_mmseqs98_cluster.withref.tsv",
-                        header=F, sep="\t")
-DruE3Clusters<-read.csv("./DruE3_mmseqs98_cluster.withref.tsv",
-                        header=F, sep="\t")
-
-
-######Read assembly summary
-AssemblySummary<-read.csv("Dru3_assembly_summary.tsv", 
-                          header = F, sep="\t",quote = "", 
-                          row.names = NULL, 
-                          stringsAsFactors = FALSE)
-
-##get representative genomes
-Dru3ReprGenomes<-read.csv("../20250424_DruantiIII_neighborhoods_genomad/Dru3_representative_genomes.txt", header=F)
-
-
-####Adding cluster info to padloc df
-DruH3padlocDfWithCl<-merge(DruH3padlocDf,DruH3Clusters, by.x ="V4", by.y="V2", all.x =T)
-DruE3padlocDfWithCl<-merge(DruE3padlocDf,DruE3Clusters, by.x ="V4", by.y="V2", all.x =T)
-
-
-#####
-
-AssemblySummary$genus<-word(AssemblySummary$V8,1)
-
-CommonGenus<-AssemblySummary %>% group_by(genus) %>%
-  count()
-CommonGenus<-CommonGenus[order(-CommonGenus$n),]
-sum(pull(CommonGenus[c(1:7),2]))/length(AssemblySummary$V1)
-TopGenus<-CommonGenus$genus[1:7]
-AssemblySummary$TopOnly<-ifelse(AssemblySummary$genus %in% TopGenus, AssemblySummary$genus, "Else")
-
-#picking colors
-TreeColors<-c("#7fc97f","#beaed4","#fdc086","#ffff99","#386cb0","#f0027f","#bf5b17","#969696")
-names(TreeColors)<-c(TopGenus,"Else")
-
-########################
-###Draw circular trees
-########################
-DrawCircularTree<-function(name,DF, treegraph)#, bootDF)
-{
-  # DF<-DruH3padlocDfWithCl
-  # tree<-DruH3TreeMidRoot
-  # name<-"DruH"
-  # bootDF<-DruH3BootstrapValuesA80
-  DruH3MetadataPADLOCLong<-merge(DF[,c(20,21,1,4,7,8)],
-                                 AssemblySummary, by.y="V1", by.x="GenomeID")
-  
-  DruH3MetadataPADLOCbyWp<-DruH3MetadataPADLOCLong %>%
-    group_by(V1.y,TopOnly)%>%
-    count()
-  names(DruH3MetadataPADLOCbyWp)<-c("ID","Genus","Count")
-  
-  #adding a small value so it will be visually seen which genus is there
-  DruH3MetadataPADLOCbyWp$log10Count<-0.1+log10(DruH3MetadataPADLOCbyWp$Count)
-  DruH3MetadataPADLOCbyWp$Genus<-factor(DruH3MetadataPADLOCbyWp$Genus, 
-                                        levels=c(TopGenus, 'Else'))
-  # 
-  # 
-  # #Plot
-  # #Draw tree
-  # DruH3BasicTreePlot<-ggtree(tree,layout = 'circular', open.angle=40, 
-  #                            size=0.2,
-  #                            color="#636363")%<+% bootDF +
-  #   geom_nodepoint(aes(size = UFboot),
-  #                  color = '#4292c6',
-  #                  alpha=.3)+
-  #   scale_size_continuous(range = c(0.01,1))+
-  #   geom_treescale(y=1, x=3, fontsize=3, linesize=0.7, offset=1)
-  # 
-  # #+
-  #   #geom_text(aes(label=B), hjust=-.5)
-  # DruH3BasicTreePlot
-  
-  DruH3WithBarPlot<-treegraph +#DruH3BasicTreePlot +
-    new_scale_fill() +
-    geom_fruit(data = DruH3MetadataPADLOCbyWp, 
-               geom = geom_bar, 
-               mapping = aes(y=ID,
-                             x=log10Count,
-                             fill=Genus),
-               pwidth=0.5, 
-               orientation="y", 
-               stat="identity",
-               offset = 0.35,
-               axis.params=list(axis="x",
-                                text.size=3),
-               grid.params=list())+
-    scale_fill_manual(values=TreeColors)+
-    ggtitle(name)
-  DruH3WithBarPlot
-  
-  #save
-  ggsave(filename=paste0(name,"_mmseqs98.trimmed.IQTree.tree.png"),
-         plot=DruH3WithBarPlot,
-         path=FigDir,
-         dpi=300,
-         width = 35,
-         height =35,
-         units = "cm")
-  ggsave(filename=paste0(name,"_mmseqs98.trimmed.IQTree.tree.svg"),
-         plot=DruH3WithBarPlot,
-         path=FigDir,
-         dpi=300,
-         width = 35,
-         height =35,
-         units = "cm")
-  return(DruH3WithBarPlot)
-}
-
-#DruH3
-DrawCircularTree("DruH",DruH3padlocDfWithCl, DruH3TreeWithCladesSimple)#DruH3TreeMidRoot, DruH3BootstrapValuesA80)
-DruEBaseTree<-DrawCircularTree("DruE",DruE3padlocDfWithCl, DruE3TreeWithCladesSimple)#DruE3TreeMidRoot, DruE3BootstrapValuesA80)
-
-#DruENoMidRoot<-DrawCircularTree("DruE_no_rerooting",DruE3padlocDfWithCl, DruE3tree@phylo, DruE3BootstrapValuesA80)
-
-##########################################################################
-##############Draw connected trees
-
-#I only want to draw connections in 555 representative genomes
-DruH3padlocDfWithClRepr<-subset(DruH3padlocDfWithCl,
-                                DruH3padlocDfWithCl$GenomeID %in% Dru3ReprGenomes$V1)
-DruE3padlocDfWithClRepr<-subset(DruE3padlocDfWithCl,
-                                DruE3padlocDfWithCl$GenomeID %in% Dru3ReprGenomes$V1)
-
-DruE3padlocDfWithClRepr$SystemID<-sapply(strsplit(DruE3padlocDfWithClRepr$V1.x, ".csv:", fixed=TRUE), 
-                               tail, 1)
-DruH3padlocDfWithClRepr$SystemID<-sapply(strsplit(DruH3padlocDfWithClRepr$V1.x, ".csv:", fixed=TRUE), 
-                                         tail, 1)
-
-GetConnections<-merge(DruE3padlocDfWithClRepr[,c(20,21,22)],
-      DruH3padlocDfWithClRepr[,c(20,21,22)],
-      by=c("GenomeID","SystemID"))
-colnames(GetConnections)[3:4]<-c("druE","druH")
-
-
-#renaming DruH leaves according to connections above
-druHtipsDF<-data.frame(druH=DruH3TreeMidRoot$tip.label)
-#I only able to keep one occurence so some of the connections will be lost
-druHtipsmerged<-merge(druHtipsDF, aggregate(druE ~ druH, data=GetConnections, head, 1), by="druH", all.x = T) 
-druHtipsmerged$newlables<-ifelse(is.na(druHtipsmerged$druE),druHtipsmerged$druH,druHtipsmerged$druE)
-#It is essential to order tips in the right order
-druHtipsmerged<-druHtipsmerged[match(DruH3TreeMidRoot$tip.label, druHtipsmerged$druH),]
-
-DruH3Mod<-DruH3TreeMidRoot
-DruH3Mod$tip.label<-druHtipsmerged$newlables
-########################################################
-###Let's plot trees now
-
-
-p1 <- ggtree(DruE3TreeMidRoot,
-             size=0.5,
-             color="#636363")
-
-p2<-ggtree(DruH3Mod,
-           size=0.5,
-           color="#636363")
-
-d1 <- p1$data
-d2 <- p2$data
+#get plot data
+Edata <- DruETreeWithCl$data
+Hdata <- DruHTree$data
 
 ## reverse x-axis and 
 ## set offset to make the tree on the right-hand side of the first tree
-d2$x <- max(d2$x) - d2$x + max(d1$x) + 1
-
-pp <- p1 + geom_tree(data=d2)
-
-dd <- bind_rows(d1, d2) %>% 
+Hdata$x <- max(Hdata$x) - Hdata$x + max(Edata$x) + 1
+#Combine trees together
+TreesSideBySide <- DruETreeWithCl + geom_tree(data=Hdata,
+                                 size=0.2,
+                                 color="#636363") 
+###get coordinates of all tips
+dd <- bind_rows(Edata, Hdata) %>% 
   filter(!is.na(label))
 ddtips<-subset(dd, dd$isTip =='TRUE')
+#merge with all possible pairs
+DruAllpairslongWithCoord<-merge(DruAllpairslong,
+      ddtips, by = "label",all.x =T)
 
-DruEvsDruH<-pp + geom_line(aes(x, y, group=label), data=ddtips, color='lightblue', linewidth=.2, alpha =.8)
+#Get nodes that connect more than with one node
+DruEcounts<-as.data.frame(table(DruAllPairs$druE)) %>% arrange(desc(Freq))
+DruHcounts<-as.data.frame(table(DruAllPairs$druH)) %>% arrange(desc(Freq))
+EdgeCountsAll<-rbind(DruEcounts,DruHcounts)
+names(EdgeCountsAll)<-c("label","n")
+
+DruAllpairslongWithCoordCounts<-merge(DruAllpairslongWithCoord,
+                                      EdgeCountsAll,
+                                      by="label")
+DruAllpairslongWithCoordCounts<-DruAllpairslongWithCoordCounts %>% group_by(group) %>%
+  mutate(vertex_degree = max(n))
+
+###draw final tree with connections
+DruEvsDruH<-TreesSideBySide + geom_line(aes(x, y, group=group, color=vertex_degree), DruAllpairslongWithCoordCounts,
+                                        alpha =.8, linewidth =.1) +
+  scale_color_gradient2(low = 'lightblue', mid = 'lightblue', high = '#d73027', midpoint =1,
+                        breaks = seq(1,13,3))
 DruEvsDruH
 
-ggsave(filename="DruE3_vs_DruH3_mmseqs98.trimmed.IQTree.tree.png",
+#save
+ggsave(filename="DruE3_vs_DruH3_tree_with_connections.pdf",
        plot=DruEvsDruH,
        path=FigDir,
        dpi=300,
-       width = 60,
-       height =25,
-       units = "cm")  
-
-########################################
-###Plotting Genomad data on the DruE phylogenetic tree
-
-##Plasmids
-pathtogenomadfolder<-"../20250424_DruantiIII_neighborhoods_genomad/genomad_output/"
-filelistgenomadplasmid = list.files(pattern="\\plasmid_summary.tsv$",
-                                    recursive = T,
-                                    path = pathtogenomadfolder)
-setwd(paste0(mainpath,"/",pathtogenomadfolder))
-GenomadResultsPlasmids<-readr::read_tsv(filelistgenomadplasmid, id="file_name")
-setwd(mainpath)
-GenomadResultsPlasmids<-separate(data =  GenomadResultsPlasmids,
-                                 col = file_name,
-                                 into=c("GenomeID",NA,NA),
-                                 sep="/")
-colnames(GenomadResultsPlasmids)[2]<-"ID"
-
-DruWithGenomadPlasmid<-merge(DruE3padlocDfWithClRepr,
-                             GenomadResultsPlasmids,
-                             by.x= c("GenomeID","V2"),
-                             by.y= c("GenomeID","ID"),
-                             all.x =T)
-nrow(subset(DruWithGenomadPlasmid, !is.na(DruWithGenomadPlasmid$length)))
-DruGenomadPlSh<-DruWithGenomadPlasmid[,c(1:3,5,8,23,27)]
-colnames(DruGenomadPlSh)[7]<-"GenomadPlasmidScore"
-
-#########################
-#viruses
-filelistgenomadvirus = list.files(pattern="\\virus_summary.tsv$",
-                                  recursive = T,
-                                  path = pathtogenomadfolder)
-setwd(paste0(mainpath,"/",pathtogenomadfolder))
-GenomadResultsViruses<-readr::read_tsv(filelistgenomadvirus, id="file_name")
-setwd(mainpath)
-
-GenomadResultsViruses<-separate(data = GenomadResultsViruses,
-                                col = file_name,
-                                into=c("GenomeID",NA,NA),
-                                sep="/")
-GenomadResultsViruses<-separate(data = GenomadResultsViruses,
-                                col = seq_name,
-                                into=c("ID","Provirus"),
-                                sep="\\|", remove = F)
-GenomadResultsViruses<-separate(data = GenomadResultsViruses,
-                                col = coordinates,
-                                into=c("Start","End"),
-                                sep="\\-")
-
-#it is essential to convert to numbers here, because otherwise it is interpreted as string
-GenomadResultsViruses$Start<-as.integer(GenomadResultsViruses$Start)
-GenomadResultsViruses$End<-as.integer(GenomadResultsViruses$End)
-
-GenomadResultsVirusesCons<-subset(GenomadResultsViruses,
-                                  GenomadResultsViruses$virus_score > .8)
-
-
-PreGenomadVirusesOnTmnContigs<-merge(DruE3padlocDfWithClRepr,
-                                     GenomadResultsVirusesCons, by.x =c("GenomeID","V2"),
-                                     by=c("GenomeID","ID"))
-PreGenomadVirusesOnTmnContigs$InProphage<-ifelse((PreGenomadVirusesOnTmnContigs$V12 >= PreGenomadVirusesOnTmnContigs$Start) & 
-                                                   (PreGenomadVirusesOnTmnContigs$V13 <= PreGenomadVirusesOnTmnContigs$End) &
-                                                   (PreGenomadVirusesOnTmnContigs$V13 <= PreGenomadVirusesOnTmnContigs$End) & 
-                                                   (PreGenomadVirusesOnTmnContigs$V13 >= PreGenomadVirusesOnTmnContigs$Start),
-                                                 1,0)
-
-GenomadVirusesOnDruContigs<-subset(PreGenomadVirusesOnTmnContigs,
-                                   InProphage == 1)
-
-
-##merging plasmid and Viral data
-DruVirPlas<-merge(DruGenomadPlSh,
-                  GenomadVirusesOnDruContigs[,c(1:3,35,31,26:28)],
-                  all.x =T,
-                  by = c("GenomeID","V2","V4"))
-#####
-DruVirPlas$InProphage<-ifelse(DruVirPlas$virus_score>0, 1, 0)
-DruVirPlas$InPlasmid<-ifelse(DruVirPlas$length>0, 4, 0)
-MGEDataForPlot<-DruVirPlas[,c("V4","InPlasmid","InProphage")]
-colnames(MGEDataForPlot)[2:3]<-c("Plasmid","Prophage")
-MGEDataForPlot[is.na(MGEDataForPlot)]<-0
-MGEDataForPlotLong<-gather(MGEDataForPlot,
-                           key = "Location", value = "Prediction", Plasmid:Prophage)
-
-
-
-DruEWithPlasmid<-DruEBaseTree +
-new_scale_fill()+
-  geom_fruit(data=MGEDataForPlotLong,
-             geom = geom_tile,
-             mapping = aes(y=V4, x= Location,
-                           fill = as.character(Prediction)),
-             pwidth=.1,
-             offset = 0.05,
-             axis.params=list(axis="x",
-                              text.size=2,
-                              text.angle=60,
-                              vjust=0,
-                              hjust=1))+
-  scale_fill_manual(values=c("#ffffff","#bebada","#8dd3c7"), guide="none")
-DruEWithPlasmid
-
-ggsave(filename="DruE3_mmseqs98.tree.withMGE.svg",
-       plot=DruEWithPlasmid,
-       path=FigDir,
-       dpi=300,
-       width = 35,
-       height =30,
-       units = "cm")
-
-ggsave(filename="DruE3_mmseqs98.tree.withMGE.png",
-       plot=DruEWithPlasmid,
-       path=FigDir,
-       dpi=300,
-       width = 35,
-       height =30,
-       units = "cm")
-
-##################
-##Compare my clades with DruH and DruE profiles
-DruE3HMMProf<-unique(DruE3padlocDf[,c("V4","V3","V6","V5")])
-DruH3HMMProf<-unique(DruH3padlocDf[,c("V4","V3","V6","V5")])
-
-DruE3TreeWithCladesAndPADLOCHMM<-DruE3TreeWithCladesSimple %<+% DruE3HMMProf +
-  geom_tippoint(aes(color = V6)) +
-  scale_color_manual(values=c("#66c2a5","#fc8d62","#8da0cb"),
-                     name = "PADLOC HMM")
-DruE3TreeWithCladesAndPADLOCHMM
-DruH3TreeWithCladesAndPADLOCHMM<-DruH3TreeWithCladesSimple %<+% DruH3HMMProf +
-  geom_tippoint(aes(color = V6)) +
-  scale_color_manual(values=c("#a6cee3","#1f78b4","#b2df8a","#33a02c",
-                              "#fb9a99","#e31a1c","#fdbf6f","#ff7f00",
-                              "#cab2d6","#6a3d9a","#ffff99","#b15928",
-                              "#bfbfbf"),
-                     name = "PADLOC HMM")
-DruH3TreeWithCladesAndPADLOCHMM
-
-ggsave(filename="DruE3_mmseqs98.tree.withPADLOCHMM.png",
-       plot=DruE3TreeWithCladesAndPADLOCHMM,
-       path=FigDir,
-       dpi=300,
-       width = 35,
-       height =30,
-       units = "cm")
-
-ggsave(filename="DruH3_mmseqs98.tree.withPADLOCHMM.png",
-       plot=DruH3TreeWithCladesAndPADLOCHMM,
-       path=FigDir,
-       dpi=300,
-       width = 35,
-       height =30,
-       units = "cm")
-
-
-
-
-
+       width = 45,
+       height =20,
+       units = "cm") 
