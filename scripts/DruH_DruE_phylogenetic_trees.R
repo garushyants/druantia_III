@@ -196,18 +196,42 @@ GenomadVirusesOnDruContigs<-subset(PreGenomadVirusesInDru,
                                    InProphage == 1)
 GenomadVirusesSimple<-GenomadVirusesOnDruContigs[,c(1,2,16,11)]
 
-
+####Add information on GEI from TreasureIsland#################
+pathtotifolder<-"./data/treasureisland_results/"
+filelistti = list.files(pattern="\\combined.csv$",
+                                  path = pathtotifolder)
+setwd(paste0(mainpath,"/",pathtotifolder))
+#filter out empty files
+filelisttifi<-filelistti[file.info(filelistti)$size > 0]
+TiResults<-readr::read_csv(filelisttifi, id="file_name", col_names = F)
+setwd(mainpath)
+TiResults$RefseqID<-str_replace(TiResults$file_name,"_combined.csv","")
+names(TiResults)[3:5]<-c("Contig","GEI_start","GEI_end")
+PreTiResultsInDru<-merge(TiResults,
+                              DruantiaAllInfo[,c(1,2,3,5,8:10)], by =c("RefseqID","Contig"))
+#....and get intersection
+PreTiResultsInDru$GEI<-ifelse((PreTiResultsInDru$Start >= PreTiResultsInDru$GEI_start) & 
+                                  (PreTiResultsInDru$End <= PreTiResultsInDru$GEI_end) &
+                                  (PreTiResultsInDru$Start <= PreTiResultsInDru$GEI_end) & 
+                                  (PreTiResultsInDru$End >= PreTiResultsInDru$GEI_start),
+                                "GEI",NA)
+GEIOnDruContigs<-subset(PreTiResultsInDru,
+                                   GEI == "GEI")
+GEIOnDruContigsSimple<-GEIOnDruContigs[,c(1,2,8,13)]
 ###################################################
 ###Add MGE data to the main dataset
 DruantiaAllWithPlasmids<-merge(DruantiaAllInfo,
                                GenomadPlasmidsSimpleIndata,
                                by = c("RefseqID","Contig"),
                                all.x =T)
-DruantiaAllWithMGE<-merge(DruantiaAllWithPlasmids,
+DruantiaAllWithPlasmidsVirus<-merge(DruantiaAllWithPlasmids,
                           GenomadVirusesSimple,
                           by = c("RefseqID","Contig","TreeRepresentative"),
                           all.x = T)
-
+DruantiaAllWithMGE<-merge(DruantiaAllWithPlasmidsVirus,
+                          GEIOnDruContigsSimple,
+                                    by = c("RefseqID","Contig","TreeRepresentative"),
+                                    all.x = T)
 # ####Save all metadata about dataset to file
 # write.table(DruantiaAllWithMGE, file = "./data/Supplementary_table_1_dataset_info.tsv",
 #             row.names = F, sep="\t", quote =F)
@@ -240,9 +264,9 @@ names(myclustercolors)<-unique(DruE3ClusterAncestryNodeOfInterest$Cluster)
 
 DrawCircularTreeWithData<-function(tree,clusternodes, bootstraps)
 {
-  #tree<-DruE3TreeMidRoot
-  #clusternodes<-DruE3ClusterAncestryNodeOfInterest
-  #bootstraps<- DruE3BootstrapValuesA80
+  # tree<-DruE3TreeMidRoot
+  # clusternodes<-DruE3ClusterAncestryNodeOfInterest
+  # bootstraps<- DruE3BootstrapValuesA80
   BasicTreePlot<-ggtree(tree,layout = 'fan', open.angle=10, 
                     size=0.2,
                     color="#636363")%<+% bootstraps +
@@ -264,13 +288,18 @@ DrawCircularTreeWithData<-function(tree,clusternodes, bootstraps)
   #############MGE data
   MGEdata<-subset(Metadata[,c("TreeRepresentative",
                               "plasmid_score",
-                              "virus_score")],
+                              "virus_score",
+                              "GEI")],
                   !(is.na(Metadata$plasmid_score) &
-                      is.na(Metadata$virus_score))
+                      is.na(Metadata$virus_score) & 
+                      is.na(Metadata$GEI))
                   )
-  MGEdata$Location<-ifelse(!is.na(MGEdata$virus_score),
-                           "prohage",
-                           "plasmid")
+  MGEdata$Plasmid<-ifelse(!is.na(MGEdata$plasmid_score),"plasmid",NA)
+  MGEdata$Prophage<-ifelse(!is.na(MGEdata$virus_score),"prophage",NA)
+  MGEdatalong<-MGEdata[,c(1,4:6)] %>% pivot_longer(cols = -TreeRepresentative,
+                                        names_to = "variable",
+                                        values_to = "Location",
+                                        values_drop_na = TRUE)
   ########################################
   ##get taxonomy for outer circles
   CommonGenusInSet<-Metadata %>% group_by(`Genus name`) %>%
@@ -328,10 +357,10 @@ DrawCircularTreeWithData<-function(tree,clusternodes, bootstraps)
   ####Vizualize all the info
   TreeWithMGE<-TreeWithCladesSimple +
     new_scale_fill()+
-    geom_fruit(data=MGEdata,
+    geom_fruit(data=MGEdatalong,
                geom = geom_tile,
                mapping = aes(y=TreeRepresentative, x= Location,
-                             fill = as.character(Location)),
+                             fill = Location),
                color="#bdbdbd",
                pwidth=.04,
                offset = 0.1,
@@ -340,7 +369,7 @@ DrawCircularTreeWithData<-function(tree,clusternodes, bootstraps)
                                 text.angle=60,
                                 vjust=0,
                                 hjust=1))+
-    scale_fill_manual(values=c("#238443","#0570b0"), guide="none", na.value = "#ffffff")
+    scale_fill_manual(values=c("#6a3d9a","#238443","#0570b0"), guide="none", na.value = "#ffffff")
   TreeWithMGEAndTax<-TreeWithMGE +
     new_scale_fill()+
     scale_fill_manual(values=c("#b2182b","#9ecae1"), name = "Domain")+
@@ -468,6 +497,9 @@ DruAllpairslongWithCoord<-merge(DruAllpairslong,
       ddtips, by = "label",all.x =T)
 
 #Get nodes that connect more than with one node
+DruAllPairs<-DruAllpairslong %>% pivot_wider(id_cols = group,
+                                             names_from = gene,
+                                             values_from = label)
 DruEcounts<-as.data.frame(table(DruAllPairs$druE)) %>% arrange(desc(Freq))
 DruHcounts<-as.data.frame(table(DruAllPairs$druH)) %>% arrange(desc(Freq))
 EdgeCountsAll<-rbind(DruEcounts,DruHcounts)
@@ -479,6 +511,12 @@ DruAllpairslongWithCoordCounts<-merge(DruAllpairslongWithCoord,
 DruAllpairslongWithCoordCounts<-DruAllpairslongWithCoordCounts %>% group_by(group) %>%
   mutate(vertex_degree = max(n))
 
+# #Saving the table with vertex degrees fo the furture use
+# VertexDegreeDf<-DruAllpairslongWithCoordCounts[,c(1:3,12)] %>%
+#   pivot_wider(id_cols = group,values_from = c(label,n),names_from = gene) %>% arrange(desc(n_druE),desc(n_druH)) 
+# write.table(VertexDegreeDf, file = "./data/Dru_vertex_degree_summary.tsv",
+#             sep="\t", row.names = F, quote = F)
+
 ###draw final tree with connections
 DruEvsDruH<-TreesSideBySide + geom_line(aes(x, y, group=group, color=vertex_degree), DruAllpairslongWithCoordCounts,
                                         alpha =.8, linewidth =.1) +
@@ -489,6 +527,21 @@ DruEvsDruH
 #save
 ggsave(filename="DruE3_vs_DruH3_tree_with_connections.pdf",
        plot=DruEvsDruH,
+       path=FigDir,
+       dpi=300,
+       width = 45,
+       height =20,
+       units = "cm") 
+
+DruPairsHighDegree<-subset(DruAllpairslongWithCoordCounts, DruAllpairslongWithCoordCounts$vertex_degree >9)
+DruEvsDruHHighDegree<-TreesSideBySide + geom_line(aes(x, y, group=group, color=vertex_degree), DruPairsHighDegree,
+                                        alpha =.8, linewidth =.1) +
+  scale_color_gradient2(low = 'lightblue', mid = 'lightblue', high = '#d73027', midpoint =1,
+                        breaks = seq(1,13,3))
+DruEvsDruHHighDegree
+
+ggsave(filename="DruE3_vs_DruH3_tree_with_high_degree_connections.pdf",
+       plot=DruEvsDruHHighDegree,
        path=FigDir,
        dpi=300,
        width = 45,
