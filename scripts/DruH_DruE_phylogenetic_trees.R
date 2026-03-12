@@ -236,6 +236,38 @@ DruantiaAllWithMGE<-merge(DruantiaAllWithPlasmidsVirus,
 # write.table(DruantiaAllWithMGE, file = "./data/Supplementary_table_1_dataset_info.tsv",
 #             row.names = F, sep="\t", quote =F)
 ##################################################################
+####Exploring gene order
+DruHDruEOrder<-DruantiaAllWithMGE %>%
+  group_by(RefseqID, Contig) %>%
+  summarize(
+    start_E = Start[Protein == "DruE3"][1],
+    end_E   = End[Protein == "DruE3"][1],
+    start_H = Start[Protein == "DruH3"][1],
+    end_H   = End[Protein == "DruH3"][1],
+    strand  = Strand[1],
+    order = case_when(
+      strand == "+" & start_E < start_H ~ "druEdruH",
+      strand == "-" & start_H < start_E ~ "druEdruH",
+      TRUE ~ "druHdruE"
+    ),
+    distance = case_when(
+      strand == "+" ~ start_E - end_H +1,  
+      strand == "-" ~ end_E - start_H +1,
+      TRUE ~ NA_real_
+    ),
+    .groups = "drop"
+  )
+unique(DruHDruEOrder$order)
+DruHDruEOrder<-subset(DruHDruEOrder, DruHDruEOrder$order !="druEdruH") #there is one case of incorrect positioning
+#In all cases the order is preserved aside from one glitch in grouping, but
+#checking of initial files suggest that the gene order is the same
+#also check the intergenic distance
+ggplot(DruHDruEOrder) +
+  geom_histogram(aes(x=distance),
+                 bins =300)+
+  geom_vline(xintercept = mean(DruHDruEOrder$distance))+
+  xlim(-500,500)
+##################################################################
 
 ####Getting nodes for clusters for later vizualization
 
@@ -256,17 +288,17 @@ DruH3ClusterAncestryNodeOfInterest<-GetNodesOfInterest(DruH3CladesAssignments,
 ##set up clades colors
 myclustercolors<-c("#a6cee3","#1f78b4","#b2df8a",
                    "#33a02c","#fb9a99","#e31a1c",
-                   "#fdbf6f","#ff7f00","#cab2d6",
-                   "#6a3d9a","#ffff99","#8c510a",
+                   "#8c510a","#ff7f00","#cab2d6",
+                   "#ffff99","#6a3d9a","#fdbf6f",
                    "#00441b","#dfc27d","#4d4d4d")
 names(myclustercolors)<-unique(DruE3ClusterAncestryNodeOfInterest$Cluster)
 
 
 DrawCircularTreeWithData<-function(tree,clusternodes, bootstraps)
 {
-  # tree<-DruE3TreeMidRoot
-  # clusternodes<-DruE3ClusterAncestryNodeOfInterest
-  # bootstraps<- DruE3BootstrapValuesA80
+  tree<-DruE3TreeMidRoot
+  clusternodes<-DruE3ClusterAncestryNodeOfInterest
+  bootstraps<- DruE3BootstrapValuesA80
   BasicTreePlot<-ggtree(tree,layout = 'fan', open.angle=10, 
                     size=0.2,
                     color="#636363")%<+% bootstraps +
@@ -371,9 +403,6 @@ DrawCircularTreeWithData<-function(tree,clusternodes, bootstraps)
                                 hjust=1))+
     scale_fill_manual(values=c("#6a3d9a","#238443","#0570b0"), guide="none", na.value = "#ffffff")
   TreeWithMGEAndTax<-TreeWithMGE +
-    new_scale_fill()+
-    scale_fill_manual(values=c("#b2182b","#9ecae1"), name = "Domain")+
-    guides(fill = guide_legend(nrow = 3))+
     new_scale_fill()+
     geom_fruit(data=ClassCountsPerLeaf,
                geom = geom_col,
@@ -511,9 +540,10 @@ DruAllpairslongWithCoordCounts<-merge(DruAllpairslongWithCoord,
 DruAllpairslongWithCoordCounts<-DruAllpairslongWithCoordCounts %>% group_by(group) %>%
   mutate(vertex_degree = max(n))
 
+
+VertexDegreeDf<-DruAllpairslongWithCoordCounts[,c(1:3,12)] %>%
+  pivot_wider(id_cols = group,values_from = c(label,n),names_from = gene) %>% arrange(desc(n_druE),desc(n_druH))
 # #Saving the table with vertex degrees fo the furture use
-# VertexDegreeDf<-DruAllpairslongWithCoordCounts[,c(1:3,12)] %>%
-#   pivot_wider(id_cols = group,values_from = c(label,n),names_from = gene) %>% arrange(desc(n_druE),desc(n_druH)) 
 # write.table(VertexDegreeDf, file = "./data/Dru_vertex_degree_summary.tsv",
 #             sep="\t", row.names = F, quote = F)
 

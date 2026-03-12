@@ -239,7 +239,7 @@ AllFunctionalAnnoNoDupl<-subset(AllFunctionalAnno, AllFunctionalAnno$duplic)
 ######
 
 
-AllFuncWithMol<-merge(AllFunctionalAnnoNoDupl[,c(1,2,9,17,18,23:27)], UniqDru3Borders[,c(3,5,21)],
+AllFuncWithMol<-merge(AllFunctionalAnnoNoDupl[,c(1,2,3,9,17,18,23:27)], UniqDru3Borders[,c(3,5,21)],
       by=c("GenomeID","seqid"))
 GenesToPlot<-AllFuncWithMol[,c(11,1:10)]
 names(GenesToPlot)[1]<-"molecule"
@@ -407,14 +407,118 @@ TipColorScheme<-c("#cb181d", "#636363")
 names(TipColorScheme)<-c("ECOR19","")
 
 #cluster colors
-myclustercolors<-c("#1f78b4","#a6cee3","#8c510a","#00441b",
-                   "#b2df8a","#cab2d6","#4d4d4d","#dfc27d",
-                   "#fb9a99","#fdbf6f","#6a3d9a","#33a02c",
-                   "#e31a1c","#ff7f00","#ffff99")
+myclustercolors<-c("#a6cee3","#1f78b4","#b2df8a",
+                   "#33a02c","#fb9a99","#e31a1c",
+                   "#8c510a","#ff7f00","#cab2d6",
+                   "#ffff99","#6a3d9a","#fdbf6f",
+                   "#00441b","#dfc27d","#4d4d4d")
 names(myclustercolors)<-unique(DruE3clades$Cluster)
+#################################################################
+#Missing from this plot is Pfam annotations by contig
 
 #################################################################
-#plot long tree
+#I plot each cluster independently
+DrawClusterContexts<-function(cluster)
+{
+  #cluster<-11
+  #subset tree
+  Node<-subset(DruE3NodeOfInterest, DruE3NodeOfInterest$Cluster ==cluster)$ClMRCA
+  subtree<-extract.clade(DruE3TreeMidRoot, node = Node)
+  DruE3BasicWBt<-ggtree(subtree,
+                        size=1,
+                        color="#636363") +
+    geom_nodelab(size=3) +
+    geom_tiplab()+
+    scale_x_continuous(limits = c(0,3.6))+
+    geom_hilight(node=getMRCA(subtree,subtree$tip.label),fill = myclustercolors[cluster],
+                 alpha=0.2,
+                 extend=.05) +
+    scale_fill_manual(values=myclustercolors,name="Cluster") +
+    new_scale_fill()
+  
+  DruE3BasicTreePlot<- DruE3BasicWBt %<+%  TipColorDF +
+    geom_tippoint(aes(colour=color),size=3)+
+    scale_colour_manual(values=TipColorScheme, guide="none")+
+    theme_tree2() 
+  leaf_order<-DruE3BasicTreePlot$data %>%
+    filter(isTip) %>% arrange (y)
+  
+  MGEDataCluster<-subset(MGEDataForPlotLong,
+                         MGEDataForPlotLong$molecule %in% subtree$tip.label)
+  MGEDataCluster$molecule<-factor(MGEDataCluster$molecule,
+                                      levels=leaf_order$label)
+  HGTPLot<-ggplot(data = MGEDataCluster, 
+                  aes(y=molecule,
+                      x=Location,
+                      fill = as.character(Prediction),
+                      color= as.character(Prediction)))+
+    geom_tile()+
+    scale_color_manual(values=c("#ffffff","#bebada","#8dd3c7"), guide="none")+
+    scale_fill_manual(values=c("#ffffff","#bebada","#8dd3c7"), guide="none")+
+    theme_tree2()+
+    theme(legend.position = 'none')
+  ##
+  GenesToPlotCluster<-subset(GenesToPlot,GenesToPlot$molecule %in% subtree$tip.label)
+  GenesToPlotCluster$molecule<-factor(GenesToPlotCluster$molecule, levels = leaf_order$label)
+  #trying to create compatible coordinates between samples
+  #the idea is to align everything on DruE
+  DruE3CoordFP<-subset(GenesToPlotCluster,
+                       GenesToPlotCluster$protein.name == "DruE3")
+  #DruE3CoordFP$middle<-DruE3CoordFP$Gstart + (DruE3CoordFP$Gend-DruE3CoordFP$Gstart)/2
+  #I want to flip the ones that have other orientation
+  DruE3CoordFP<-DruE3CoordFP%>%group_by(molecule) %>%
+    mutate(middle = Gstart +(Gend-Gstart)/2)
+  GenesToPlotNC<-merge(GenesToPlotCluster, DruE3CoordFP[,c(1,11,13)], by= "molecule")
+  
+  GenesToPlotNC$pstart<-ifelse(GenesToPlotNC$ggstrand.y,
+                               GenesToPlotNC$Gstart - GenesToPlotNC$middle,
+                               GenesToPlotNC$middle - GenesToPlotNC$Gend)
+  GenesToPlotNC$pend<-ifelse(GenesToPlotNC$ggstrand.y,
+                             GenesToPlotNC$Gend - GenesToPlotNC$middle,
+                             GenesToPlotNC$middle - GenesToPlotNC$Gstart)
+  GenesToPlotNC$pstrand<-ifelse(GenesToPlotNC$ggstrand.y,
+                                GenesToPlotNC$ggstrand.x,
+                                !GenesToPlotNC$ggstrand.x)
+  
+  ###finally ploting
+  GenesPlot<-ggplot(data = GenesToPlotNC,
+                    aes(y =  molecule,
+                        xmin = pstart,
+                        xmax = pend))+ 
+    geom_hline(aes(yintercept = molecule),
+               linewidth =.5, color ="#bdbdbd")+
+    geom_gene_arrow(aes(fill = fill,
+                        forward=pstrand))+
+    geom_gene_label(aes(label=Agene))+
+    scale_fill_manual(values = GenesColors, na.value="white")+
+    theme_tree2()+
+    theme(legend.position = "right")
+  
+  p<- ggarrange(DruE3BasicTreePlot,
+                HGTPLot,
+                GenesPlot, nrow =1,
+                widths = c(0.5,.05,1),
+                legend = "none",
+                align='hv')
+  p
+  
+  ggsave(paste0("DruE_Cl",cluster,"_neighborhoods_and_HGT_20000.pdf"),
+         plot=p,
+         path = "../20260211_DruE_neighborhood_by_cluster",
+         width=50,
+         height = ifelse(length(leaf_order$label)/2 <=10,
+                         12,
+                         length(leaf_order$label)/2),
+         limitsize = F,
+         units="cm",
+         dpi=300)
+}
+
+DrawClusterContexts(11)
+DrawClusterContexts(13)
+DrawClusterContexts(2)
+DrawClusterContexts(8)
+#################################################################
 DruE3BasicWBt<-ggtree(DruE3TreeMidRoot,
                            size=1,
                            color="#636363") +
@@ -515,13 +619,135 @@ p<- ggarrange(DruE3BasicTreePlot,
 ######################
 ggsave("DruE_long_with_neighborhoods_and_HGT_20000.pdf",
        plot=p,
+       path = "../20260211_DruE_neighborhood_by_cluster",
        limitsize = FALSE,
        width =190,
        height=170,
        units="cm",
        dpi=1000)
   
+###############################
+################################
+#The simple
+DomainRankings<-AllFunctionalAnnoNoDupl |> group_by(name) |>
+  summarise (n = n()) |>
+  arrange(desc(n))
+#methylases are common
 
+#In reality I have to do that by clade and by not merging the domains
+##Merge PFAM with GFF
+PFAMinSelectedRegions<-merge(AllFuncWithMol[,c(1:2,4:8,11)],
+                             PFAMdata[,c(2:18)],
+                             by.x =  c("GenomeID","target.name"), by.y = c("GenomeID","seq_id"), all.x = T)
+PFAMinSelectedRegionsWClades<-merge(PFAMinSelectedRegions,
+                                    DruE3clades, by.x = "target.name", by.y = "Sequence", all.x = T)
+
+DruEClusterSizes<-DruE3clades |> group_by(Cluster) |> summarise(ClSize = n())
+#Removing domains found in DruE3 and DruH3, and only keeping neighboring ones
+PFAMinSelectedRegionsWCladesNoDru<-subset(PFAMinSelectedRegionsWClades,
+                                          PFAMinSelectedRegionsWClades$system != "druantia_type_III")
+DomainRankingsByClade<-PFAMinSelectedRegionsWCladesNoDru |> group_by(Cluster,hmm_name,PFAMID, clan) |>
+  summarise (n = n()) |>
+  arrange(desc(n)) 
+
+DomainRankingsByCladeNoNA<-DomainRankingsByClade  %>% drop_na()
+
+DomainRankingsByCladeWSize<-merge(DomainRankingsByCladeNoNA, DruEClusterSizes, by = "Cluster", all.x =T)
+
+DruEMostCommonDomainsByClade<-subset(DomainRankingsByCladeWSize, DomainRankingsByCladeWSize$n > DomainRankingsByCladeWSize$ClSize*.4)
+###I want to add empty clusters
+DruEMostCommonDomainsByCladeAllClusters<-merge(DruEMostCommonDomainsByClade, DruEClusterSizes,
+                                               by=c("Cluster","ClSize"), all.y = T)
+DruEMostCommonDomainsByCladeAllClusters$perc<-DruEMostCommonDomainsByCladeAllClusters$n*100/DruEMostCommonDomainsByCladeAllClusters$ClSize
+DruEMostCommonDomainsByCladeAllClusters$hmm_name[is.na(DruEMostCommonDomainsByCladeAllClusters$hmm_name)] <- ""
+DruEMostCommonDomainsByCladeAllClusters$ClusterHeader<-paste0("Clade ",DruEMostCommonDomainsByCladeAllClusters$Cluster, " n=", 
+                                                              DruEMostCommonDomainsByCladeAllClusters$ClSize)
+DruEMostCommonDomainsByCladeAllClusters$ClusterHeader<-factor(DruEMostCommonDomainsByCladeAllClusters$ClusterHeader,
+                                                              levels= unique(DruEMostCommonDomainsByCladeAllClusters$ClusterHeader))
+
+#Plot  
+
+DruantiaIIIDomainsInNeib<-ggplot(data=DruEMostCommonDomainsByCladeAllClusters,
+                                 aes(x = hmm_name, y = perc, fill = clan)) +
+  geom_col() +
+  facet_wrap(~ ClusterHeader, ncol =5)+#, scales = "free_y")+
+  theme_classic()+
+  ylab("%")+
+  theme(axis.text.x = element_text(angle =90, vjust =.5, hjust =1))+
+  scale_fill_manual(values=c("#a6cee3","#1f78b4","#b2df8a","#33a02c",
+                             "#fb9a99","#e31a1c","#fdbf6f","#ff7f00",
+                             "#cab2d6","#6a3d9a"), na.translate=FALSE)
+
+DruantiaIIIDomainsInNeib
+ggsave("DruE_domains_in_neighborhood_40p_20000.pdf",
+       path=FiguresAndDataFolder,
+       plot=DruantiaIIIDomainsInNeib,
+       width=24, height=15,
+       limitsize = F,
+       units="cm",
+       dpi=300)
+####Also I want to figure out how many of those has some kinds of tRNAs nearby...
+####For the ones that I have it, I will pull all the genomes to look at the gene contexts and try to reconstruct whole the cargo that is there
+NonCDSgenesIntegrase<-subset(GenesToPlotNC, GenesToPlotNC$X3 !="CDS" |
+                               GenesToPlotNC$phage == "Integrase")
+
+NonCDSgenesWClade<-merge(NonCDSgenesIntegrase, DruE3clades, by.x = "molecule", by.y = "Sequence")
+NonCDSgenesWCladeCounts<-merge(NonCDSgenesWClade, DruEClusterSizes, by = "Cluster")
+NonCDSgenesWCladeCounts$ClusterHeader<-paste0("Clade ",NonCDSgenesWCladeCounts$Cluster, " n=", 
+                                              NonCDSgenesWCladeCounts$ClSize)
+NonCDSgenesWCladeCounts$ClusterHeader<-factor(NonCDSgenesWCladeCounts$ClusterHeader,
+                                              levels= unique(NonCDSgenesWCladeCounts$ClusterHeader))
+NonCDSgenesWCladeCounts$GeneLabels<-ifelse(NonCDSgenesWCladeCounts$X3 == "riboswitch",
+                                           "riboswitch",
+                                           ifelse(NonCDSgenesWCladeCounts$X3 =="CDS",
+                                                  "Integrase",
+                                                  NonCDSgenesWCladeCounts$Agene)
+)
+NonCDSgenesWCladeCounts$GeneLabelsSimp<-ifelse(NonCDSgenesWCladeCounts$X3 == "sequence_feature",
+                                               NonCDSgenesWCladeCounts$Agene,
+                                               ifelse(NonCDSgenesWCladeCounts$X3 =="CDS",
+                                                      "Integrase",
+                                                      NonCDSgenesWCladeCounts$X3)
+)
+#plot
+DruIIIMobilitySimp<-ggplot(NonCDSgenesWCladeCounts, aes(x = GeneLabelsSimp, fill = color))+
+  geom_histogram(stat = "count") +
+  facet_wrap(~ClusterHeader, scales = "free_y")+
+  theme_classic()+
+  ylab("count")+
+  xlab("")+
+  theme(axis.text.x = element_text(angle =90, vjust =.5, hjust =1))
+DruIIIMobilitySimp
+ggsave("DruIII_integrase_RNAs_in_neighborhood_simple_20000.pdf",
+       path=FiguresAndDataFolder,
+       plot=DruIIIMobilitySimp,
+       width=24, height=15,
+       limitsize = F,
+       units="cm",
+       dpi=300)
+###So indeed there are more promising classes aside from Clade 11
+###Clade1 (has tRNAs and tmRNAs),Clade2, Clade6 (t and tm), 
+###Clade12, Clade13 (also has rRNAs), Clade14 (has tRNAs in less than half cases)
+###Clade1 & 12 are less spread out and had mostly representatives from Vibrio
+###Clade2 is also multiple species, so it might be interesting
+###Clade14 can be interesting because it is soil bacteria, and they might have something very different
+
+DruIIIMobility<-ggplot(NonCDSgenesWCladeCounts, aes(x = GeneLabels, fill = color))+
+  geom_histogram(stat = "count") +
+  facet_wrap(~ClusterHeader, scales = "free_y")+
+  theme_classic()+
+  ylab("count")+
+  xlab("")+
+  theme(axis.text.x = element_text(angle =90, vjust =.5, hjust =1),
+        legend.position = "bottom")
+DruIIIMobility
+ggsave("DruIII_integrase_RNAs_in_neighborhood_20000.pdf",
+       path=FiguresAndDataFolder,
+       plot=DruIIIMobility,
+       width=35, height=19,
+       limitsize = F,
+       units="cm",
+       dpi=300)
 
 
 
