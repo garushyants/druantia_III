@@ -8,6 +8,7 @@ library(dplyr)
 library(tidyr)
 library(ggnewscale)
 library(ggtreeExtra)
+library(Biostrings)
 
 ###################
 mainpath<-paste0(dirname(this.path()),"/../")
@@ -338,6 +339,89 @@ DruEZorETree
 
 ggsave("ZorE_DruE_tree_with_connections.pdf",
        plot=DruEZorETree,
+       path=FigDir,
+       width=40,
+       height=30,
+       dpi=300,
+       units="cm")
+
+########################
+########################
+#Looking at ZorE most C-terminal domain
+# read alignment (FASTA format assumed)
+ZorEAln <- readAAStringSet("./data/ZorE2_mmseqs98.MUSCLE5.nuclease_motif.faa")
+# extract positions 915–1040
+ZorECterminus <- subseq(ZorEAln, start = 915, end = 1040)
+# count gaps ("-") per sequence
+Ctermgap_counts <- vcountPattern("-", ZorECterminus)
+# build dataframe
+Ctermgap_df <- data.frame(
+  sequence = names(ZorECterminus),
+  gap_count = as.numeric(Ctermgap_counts),
+  row.names = NULL
+)
+Ctermgap_df$Cterm<-ifelse(Ctermgap_df$gap_count/(1040-915+1) > 0.7, 0,1)
+
+Ctermgap_df <- Ctermgap_df %>%
+  mutate(
+    Protein_ID = sub(" .*", "", sequence)
+  )
+Ctermgap_df$line<-rep("ZorE C-terminus", length(Ctermgap_df$sequence))
+###Let's now plot it on the tree
+
+ZorETreeToSaveWithCTerm<-ZorEBasicTree+
+  new_scale_fill()+
+  geom_fruit(data=Ctermgap_df,
+             geom = geom_tile,
+             mapping =aes(y = Protein_ID,
+                          x=line,
+                          fill = as.factor(Cterm)),
+             offset =0.01, pwidth =.07)+
+  scale_fill_manual(values = c("white","#4393c3"),
+                    na.translate = FALSE,
+                    name = "ZorE C-terminus")+
+  new_scale_fill()+
+  geom_fruit(data=ZorEWithDru,
+             geom = geom_tile,
+             mapping =aes(y = TreeRepresentative.x,
+                          x=Protein.x,
+                          fill = Dru3),
+             offset =0.015, pwidth =.1)+
+  scale_fill_manual(values = c("#542788","#80cdc1","#dfc27d"),
+                    na.value = "white",
+                    na.translate = FALSE,
+                    name = "Druantia III location")+
+  new_scale_fill()+
+  geom_fruit(data=ZorEClassCountsPerLeaf,
+             geom = geom_col,
+             mapping = aes(y=TreeRepresentative,
+                           fill = CommonClass,
+                           x = percent),
+             offset =0.02, pwidth =.02)+
+  scale_fill_manual(values=classcolors, name = "Class")+
+  guides(fill = guide_legend(nrow = 4))+
+  new_scale_fill()+
+  geom_fruit(data=ZorEGenusCountsPerLeaf,
+             geom = geom_col,
+             mapping = aes(y=TreeRepresentative,
+                           fill = TopGenus,
+                           x = percent),
+             offset =0.01, pwidth =.06)+
+  scale_fill_manual(values=genuscolors, name = "Genus")+
+  guides(fill = guide_legend(nrow = 4))+
+  geom_fruit(data = ZorEHitsCountsPerLeaf,
+             geom = geom_col,
+             mapping = aes(y=TreeRepresentative,
+                           x=logCount), fill= "#878787",
+             pwidth =.4,
+             axis.params=list(axis="x",
+                              text.size=3,
+                              line.size=.3),
+             grid.params = list(size=.3,
+                                alpha=.3))
+ZorETreeToSaveWithCTerm     
+ggsave("ZorE_tree_with_Tax_and_DruE_location_ZorECterm.pdf",
+       plot=ZorETreeToSaveWithCTerm,
        path=FigDir,
        width=40,
        height=30,
