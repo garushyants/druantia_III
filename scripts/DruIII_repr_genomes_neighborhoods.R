@@ -5,39 +5,47 @@ library(ggplot2)
 library(gggenes)
 library(ggtree)
 library(ggpubr)
+#library(aplot)
 library(ape)
 library(phytools)
 library(scales)
-#library(ggnewscale)
+library(ggnewscale)
 library(tidyr)
-
-mainpath<-"/Volumes/garushyants/druantia_zorya/20250506_DruIII_defense_neighborhoods"
+library(this.path)
+library(RColorBrewer)
+###################
+mainpath<-paste0(dirname(this.path()),"/../")
 setwd(mainpath)
+
+Window = 20000 #the size of the neighborhood to extract
+
+FigDir<-"figures/DruantiaIII_neighborhoods"
+
+if (!dir.exists(FigDir)){
+  dir.create(FigDir,recursive = TRUE)
+} else {
+  print("Directory already exists!")
+}
 ###############
-##
 ##In this version I am combining DefenseFinder and PADLOC outputs to get the more detailed picture
-##I don't think that in reality it improves things by much, but I prefer to have it all together
-##And also add info from general annotation in GFFs
-##2025/09/25 And more importantly I add clades that I selected from DruE/DruH trees
 ###############
 
-##The important thing that I need to get genome coordinates
-##And genes of interest for downstream PFAM analysis
-##And for that I need to read info from GFF files
-GFFPath<-"./representative_genomes"
+#Starting by reading GFFs from representative genomes
+GFFPath<-"./data/Druantia_neigborhoods/representative_genomes"
 GFFFiles<-list.files(pattern="\\_genomic.gff.gz$",
                                        path = GFFPath)
 setwd(paste(mainpath,GFFPath,sep="/"))
 #Reading archived GFFs takes some time
 GFFdata<-readr::read_tsv(GFFFiles, id="file_name", skip = 9, col_names = F)
-GFFdataCDS<-subset(GFFdata, GFFdata$X3 == "CDS")
+#I select here both CDS and some non-coding genes
+GFFdataCDS<-subset(GFFdata, !(GFFdata$X3 %in% c("gene","pseudogene","exon","region")) & !is.na(GFFdata$X2))
 GFFdataCDS$GenomeID<-str_replace(GFFdataCDS$file_name,"_genomic.gff.gz","")
+
 setwd(mainpath)
 
-#####Right way to extract fields from GFF
+###Extracting fields
+#######Select the required annotation fields
 extractField<-function(pattern, column){
-  #pattern<-'\\;product=([^;]+)\\;'
-  #column<-TmnNeigGFF$V10
   r<-regexpr(pattern,column)
   out <- rep(NA,length(column))
   out[r!=-1] <- regmatches(column, r)
@@ -45,21 +53,26 @@ extractField<-function(pattern, column){
   return(out)
 }
 #####
-GFFdataCDS$ID<-extractField('ID=cds-([^;]+)\\;',GFFdataCDS$X9)
-GFFdataCDS$ID<-str_replace(GFFdataCDS$ID,"ID=cds-","")
+GFFdataCDS$X9<-paste0(GFFdataCDS$X9,";")#I do that in case the product is last record
+GFFdataCDS$ID<-extractField('ID=[^-]+-([^;]+)\\;',GFFdataCDS$X9)
+GFFdataCDS$ID<-str_split(GFFdataCDS$ID,"-",simplify = T, n = 5)[,2]
+GFFdataCDS$gene<-extractField('\\;gene=([^;]+)\\;',GFFdataCDS$X9)
+GFFdataCDS$gene<-str_replace(GFFdataCDS$gene,"gene=","")
+GFFdataCDS$note<-extractField('\\;Note=([^;]+)\\;',GFFdataCDS$X9)
+GFFdataCDS$note<-str_replace(GFFdataCDS$note,"Note=","")
 GFFdataCDS$product<-extractField('\\;product=([^;]+)\\;',GFFdataCDS$X9)
 GFFdataCDS$product<-str_replace(GFFdataCDS$product,"product=","")
 names(GFFdataCDS)[2]<-"seqid"
 
 #############################
 ###read DruE tree
-DruE3tree <- read.tree("../20250423_Druantia3_whole_systems/DruE3_mmseqs98.trimmed.modelselection.IQTree.treefile")
+DruE3tree <- read.tree("./data/phylogenetic_trees/DruE3_mmseqs98.trimmed.modelselection.IQTree.treefile")
 
 #reroot
 DruE3TreeMidRoot<-midpoint.root(DruE3tree)
 
 ###load clades
- DruE3clades<-read.csv("../20250717_DruE_DruH_treecluster/DruE3_med_clade_3_final_clades.tsv", header=T, sep="\t")
+ DruE3clades<-read.csv("./data/phylogenetic_trees/DruE3_med_clade_3_final_clades.tsv", header=T, sep="\t")
  #get mrca
  DruE3NodeOfInterest<-DruE3clades %>% group_by(Cluster) %>%
    summarise(ClMRCA=getMRCA(DruE3TreeMidRoot, Sequence))
@@ -68,7 +81,7 @@ DruE3TreeMidRoot<-midpoint.root(DruE3tree)
 #Reading In PADLOC data to find the borders
 ######################
 ##Read PADLOC files
-PADLOCpath<-"./PADLOC_representative"
+PADLOCpath<-"./data/Druantia_neigborhoods/PADLOC_representative"
 PADLOCselectedFiles<-list.files(pattern="\\.csv$",
                                 recursive = T,
                                 path = PADLOCpath)
@@ -86,14 +99,12 @@ tmp<-PADLOCDruIII %>% group_by(seqid, system.number, GenomeID) %>%
          system.end = max(c(start,end)))
 DruEBorders<-subset(tmp, tmp$protein.name == "DruE3")
 #get borders
-Window = 20000
 DruEBorders$regionleft<-ifelse((DruEBorders$system.start-Window)>0, 
                                           DruEBorders$system.start-Window, 0)
 DruEBorders$regionright<-DruEBorders$system.end+Window
 #I have to remove the ones are DruE but not the ones on the tree
 DruE3ReprSystemsOnTree<-subset(DruEBorders, DruEBorders$target.name %in% DruE3tree$tip.label)
 #And then remove hits from one genome to get rid of duplicates
-#I have duplicates for the following
 #WP_021699417.1 removing GCF_900455475.1
 #WP_021702843.1 removing GCF_900455475.1
 
@@ -104,7 +115,6 @@ UniqDru3Borders<-subset(DruE3ReprSystemsOnTree,
 PADLOCMainDF<-merge(PADLOCdata, UniqDru3Borders[,c(21,24,25,3)], 
               by = c("GenomeID",
                      "seqid"))
-
 
 PADLOCMergeWithRegionsDF<-PADLOCMainDF %>% mutate(ROI = case_when(
   start >= regionleft & start <= regionright &
@@ -135,19 +145,18 @@ GFFMergeWithRegionsDF<-GFFMainDF %>% mutate(ROI = case_when(
     X5 >= regionleft & X5 <= regionright ~ "Y"
 ))
 ######################
-#This is a table of 20519 records that I can use for the PFAM run later on, but also allows to deal with DefenseFinder
+#This is a table of all GFF records that are used for the downstream PFAM annotation
 GFFSelectedRegionsDF<-subset(GFFMergeWithRegionsDF,
                           GFFMergeWithRegionsDF$ROI =="Y")
 
-
-###Saving this to run the PFAM annotation later on
-GFFIDsToSave<-GFFSelectedRegionsDF[,c("GenomeID","ID")]
-write.table(GFFIDsToSave, file = "PFAM_GeneIDs_15000.tsv",
-            sep="\t",quote = F, row.names = F, col.names = F)
+# ###Saving this to run the PFAM annotation later on
+# GFFIDsToSave<-GFFSelectedRegionsDF[,c("GenomeID","ID")]
+# write.table(GFFIDsToSave, file = "PFAM_GeneIDs_20000.tsv",
+#             sep="\t",quote = F, row.names = F, col.names = F)
 
 ##########################################
 ##Reading PFAM hmmscan output
-PFAMpath<-"./PFAM_search_20250515/"
+PFAMpath<-"data/Druantia_neigborhoods/PFAM_search_20251121/"
 PFAMselectedFiles<-list.files(pattern="\\.csv$",
                                 recursive = T,
                                 path = PFAMpath)
@@ -158,34 +167,41 @@ PFAMdata$GenomeID<-str_replace(PFAMdata$file_name,"_pfamscan.csv","")
 setwd(mainpath)
 
 PFAMdata$PFAMID<-str_split_i(PFAMdata$hmm_acc,"\\.",1)
-###PFAM phage associated domains
-PFAMPhage<-read.csv("PFAM_list_of_Phage_domains_fromRoman.tsv",
-                    sep="\t", header=F)
-PFAMPhage$IsPhage<-rep("Ph", length(PFAMPhage$V1))
 ##
-PFAMdataWPhage<-merge(PFAMdata,PFAMPhage[,c(1,4)],
-                      by.x="PFAMID", by.y = "V1", all.x =T)
+PFAMdatashort<-PFAMdata %>% group_by(GenomeID,seq_id) %>%
+  summarise(PFAM_IDs = paste(sort(unique(PFAMID)), collapse = ";"),
+            PHMM_names = paste(unique(hmm_name), collapse = ";"),
+            .groups = "drop")
 
-PFAMdataMDom<-PFAMdataWPhage %>% group_by(GenomeID,seq_id) %>%
-  fill(IsPhage) %>%
-  summarise(name=str_c(unique(hmm_name), collapse="/"),
-            phage = unique(IsPhage))
-names(PFAMdataMDom)[2]<-"ID"
-
-
-######
+# ###PFAM phage associated domains
+# PFAMPhage<-read.csv("PFAM_list_of_Phage_domains_fromRoman.tsv",
+#                     sep="\t", header=F)
+# PFAMPhage$IsPhage<-rep("Ph", length(PFAMPhage$V1))
+# ##
+# PFAMdataWPhage<-merge(PFAMdata,PFAMPhage[,c(1,4)],
+#                       by.x="PFAMID", by.y = "V1", all.x =T)
+# 
+# PFAMdataMDom<-PFAMdataWPhage %>% group_by(GenomeID,seq_id) %>%
+#   fill(IsPhage) %>%
+#   summarise(name=str_c(unique(hmm_name), collapse="/"),
+#             phage = unique(IsPhage))
+# names(PFAMdataMDom)[2]<-"ID"
 
 ##Merge PFAM with GFF
-GFFwithPFAM<-merge(GFFSelectedRegionsDF[,c(1,2,6,7,9,12,13)],
-                   PFAMdataMDom,
-                   by =  c("GenomeID","ID"), all.x = T)
+GFFwPFAMofInterest<-merge(GFFSelectedRegionsDF[,c(1,2,5,6,7,9,12,13,14,15)],
+                          PFAMdatashort,
+                          by.x = c("GenomeID","ID"),
+                          by.y = c("GenomeID","seq_id"),
+                          all.x=T)
 
 ############################################
 ##Read DefenseFinder genes files
-DefenseFinderpath<-"./DefenseFinder_output_20250514"
-DefenseFinderselectedFiles<-list.files(pattern="\\_defense_finder_genes.tsv$",
-                                recursive = T,
-                                path = DefenseFinderpath)
+DefenseFinderpath<-"data/Druantia_neigborhoods/DefenseFinder_output/"
+#this is way faster than doing a recursive search for files
+DefenseFinderselectedFolders<-list.files(path = DefenseFinderpath)
+DefenseFinderselectedFiles<-paste0(DefenseFinderselectedFolders, "/",
+                                   DefenseFinderselectedFolders,
+                                   "_protein.faa_defense_finder_genes.tsv")
 setwd(paste0(mainpath,"/",DefenseFinderpath))
 
 DefenseFinderdata<-readr::read_tsv(DefenseFinderselectedFiles, id="file_name")
@@ -195,18 +211,56 @@ setwd(mainpath)
 
 ###
 ##Merge DefenseFinder results with GFF selected regions
-DFwithCoord<-merge(GFFwithPFAM,
+DFwithCoord<-merge(GFFwPFAMofInterest,
                    DefenseFinderdata, by.x = c("GenomeID","ID"),
                    by.y = c("GenomeID","hit_id"), all.x =T)
 
-DFwithCoordSh<-DFwithCoord[,c(1:8,9,12,15,32:34)]
+DFwithCoordSh<-DFwithCoord[,c(1:12,15,35:37)]
 ##################################
-#####Create the final annotation file
+##Add geNomad Annotations
+#I do this annotation on the same selected proteoomes as PFAM search
+GenomadAnnotation<-read.csv("./data/Druantia_neigborhoods/GenomadAnnotateResults_20260325.tsv",
+                            sep="\t", header=F)
+#Filter results
+GenomadAnnotationFiltered<-subset(GenomadAnnotation,
+                                  GenomadAnnotation$V3 < 0.001 & #E-value filter as in default genomad
+                                    GenomadAnnotation$V6 > 0.75) #V6 is target coverage
+##
+GenomadAnnotationMeta<-read.csv("./data/Druantia_neigborhoods/genomad_metadata_v1.9.tsv", 
+                                sep="\t")
+GenomadAnnotationFull<-merge(GenomadAnnotationFiltered, 
+                             GenomadAnnotationMeta,
+                             by.x="V2",
+                             by.y="MARKER",
+                             all.x =T)
+###Merge with other
+collapse_safe <- function(x) {
+  x <- sort(unique(na.omit(x)))
+  if (length(x) == 0) NA_character_ else paste(x, collapse = ";")
+}
+
+GenomadAnnoCollapsed<-GenomadAnnotationFull %>% group_by(V1) %>%
+  summarise(
+    annotation_accessions        = collapse_safe(ANNOTATION_ACCESSIONS),
+    annotation_descriptions      = collapse_safe(ANNOTATION_DESCRIPTION),
+    genomad_hmm_ids               = collapse_safe(V2),
+    genomad_specificity_class     = collapse_safe(SPECIFICITY_CLASS),
+    .groups = "drop"
+  )
+########Merge with GFF and PFAM above
+GFFwPGofInterest<-merge(DFwithCoordSh,
+                        GenomadAnnoCollapsed,
+                        by.x = c("ID"),
+                        by.y = c("V1"),
+                        all.x=T)
+##################################
+#####Create the final annotation dataframe
 ##Merge With PADLOC
-AllFunctionalAnno<-merge(DFwithCoordSh, 
+AllFunctionalAnno<-merge(GFFwPGofInterest, 
                          PADLOCSelectedRegionsDF[,c(1:6,9,14:17)],
                          by.x=c("GenomeID","seqid","ID"),
                          by.y=c("GenomeID","seqid","target.name"), all=T)
+
 AllFunctionalAnno$Gstart<-ifelse(is.na(AllFunctionalAnno$start),
                                  AllFunctionalAnno$X4, AllFunctionalAnno$start)
 AllFunctionalAnno$Gend<-ifelse(is.na(AllFunctionalAnno$end),
@@ -236,7 +290,396 @@ AllFunctionalAnno$duplic<-ifelse((AllFunctionalAnno$Gend == lag(AllFunctionalAnn
                                    is.na(AllFunctionalAnno$protein.name),
                                   F,T)
 AllFunctionalAnnoNoDupl<-subset(AllFunctionalAnno, AllFunctionalAnno$duplic)
-######
+#############################################################################
+###############Merging annotations to show on the final plot
+AllFunctionalAnnoNoDupl$HMM_Annot_IDs<-ifelse(!is.na(AllFunctionalAnnoNoDupl$annotation_accessions),
+                                  AllFunctionalAnnoNoDupl$annotation_accessions,
+                                  ifelse(!is.na(AllFunctionalAnnoNoDupl$PFAM_IDs),
+                                         AllFunctionalAnnoNoDupl$PFAM_IDs,
+                                         NA))
+AllFunctionalAnnoNoDupl$product_description<-ifelse(!is.na(AllFunctionalAnnoNoDupl$protein.name),
+                                                    AllFunctionalAnnoNoDupl$protein.name,
+                                                    ifelse(!is.na(AllFunctionalAnnoNoDupl$gene_name),
+                                                           AllFunctionalAnnoNoDupl$gene_name,
+                                                           ifelse(!is.na(AllFunctionalAnnoNoDupl$annotation_descriptions),
+                                                                  AllFunctionalAnnoNoDupl$annotation_descriptions,
+                                                                  ifelse(is.na(AllFunctionalAnnoNoDupl$product),
+                                                                         ifelse(is.na(AllFunctionalAnnoNoDupl$note),
+                                                                                AllFunctionalAnnoNoDupl$X3,
+                                                                                AllFunctionalAnnoNoDupl$note),
+                                                                         AllFunctionalAnnoNoDupl$product))))
+####created combined annotation
+AllFunctionalAnnoNoDupl$PlotLabel<-ifelse(!is.na(AllFunctionalAnnoNoDupl$protein.name),
+                                          AllFunctionalAnnoNoDupl$protein.name,
+                                          ifelse(!is.na(AllFunctionalAnnoNoDupl$gene_name),
+                                                 AllFunctionalAnnoNoDupl$gene_name,
+                                                 ifelse(!is.na(AllFunctionalAnnoNoDupl$gene),
+                                                        AllFunctionalAnnoNoDupl$gene,
+                                                        ifelse(!is.na(AllFunctionalAnnoNoDupl$PFAM_IDs),
+                                                               AllFunctionalAnnoNoDupl$PFAM_IDs,
+                                                               ifelse(!is.na(AllFunctionalAnnoNoDupl$annotation_descriptions),
+                                                                      AllFunctionalAnnoNoDupl$annotation_accessions,
+                                                                      ifelse(AllFunctionalAnnoNoDupl$X3 != "CDS",
+                                                                             ifelse(AllFunctionalAnnoNoDupl$X3 =="sequence_feature",
+                                                                                    AllFunctionalAnnoNoDupl$note,
+                                                                                    AllFunctionalAnnoNoDupl$X3),
+                                                                             AllFunctionalAnnoNoDupl$product))))))
+
+#Add viral things
+AllFunctionalAnnoNoDupl$Integrase<-grepl("integrase|recombinase", AllFunctionalAnnoNoDupl$product_description, ignore.case=T)
+#Add fill
+AllFunctionalAnnoNoDupl$fill<-ifelse(AllFunctionalAnnoNoDupl$PlotLabel %in% c("DruH3","DruE3"),
+                                     "druantia_type_III",
+                                     ifelse(AllFunctionalAnnoNoDupl$X3 != "CDS",
+                                            ifelse(AllFunctionalAnnoNoDupl$X3 =="sequence_feature",
+                                                   NA,
+                                                   AllFunctionalAnnoNoDupl$X3),
+                                            ifelse(!is.na(AllFunctionalAnnoNoDupl$system.number),
+                                                   ifelse(startsWith(AllFunctionalAnnoNoDupl$system,"PDC"),
+                                                          NA,AllFunctionalAnnoNoDupl$system),
+                                                   ifelse(!is.na(AllFunctionalAnnoNoDupl$activity) &
+                                                            AllFunctionalAnnoNoDupl$activity == "Antidefense",
+                                                          "Antidefense",
+                                                          ifelse(AllFunctionalAnnoNoDupl$Integrase,
+                                                                 "integrase",
+                                                                 ifelse(!is.na(AllFunctionalAnnoNoDupl$genomad_specificity_class),
+                                                                        ifelse(grepl("VV",AllFunctionalAnnoNoDupl$genomad_specificity_class),
+                                                                               "phage",
+                                                                               ifelse(grepl("PP",AllFunctionalAnnoNoDupl$genomad_specificity_class),
+                                                                                      "plasmid",
+                                                                                      NA)
+                                                                        ),
+                                                                        NA)
+                                                          )))))
+AllFunctionalAnnoNoDupl$X3<-ifelse(is.na(AllFunctionalAnnoNoDupl$X3),
+                                  "CDS",AllFunctionalAnnoNoDupl$X3)
+
+##############################################################################
+###Now add original protein ID
+AllFuncWithMol<-merge(AllFunctionalAnnoNoDupl,UniqDru3Borders[,c(3,5,21)],
+                      by=c("GenomeID","seqid"))
+#Add clade ID
+AllFuncWithMolClade<-merge(AllFuncWithMol,DruE3clades, by.x = "target.name", by.y ="Sequence")
+
+#ARMADA adjustment
+AllFuncWithMolClade <- AllFuncWithMolClade %>%
+  group_by(GenomeID, seqid) %>%
+  mutate(
+    arm_match = case_when(
+      (grepl("ZorD_partial", PlotLabel) |
+        grepl("PF00176;PF00271", PlotLabel)) ~ "ArmA",
+      grepl("REase_MTase_IIG", PlotLabel) ~ "ArmB",
+      grepl("DruE_partial", PlotLabel) ~ "ArmC",
+      grepl("PF00580;PF13361", PlotLabel) ~ "ArmD",
+      TRUE ~ NA_character_
+    ),
+    
+    # count DISTINCT ARM components
+    arm_count = n_distinct(arm_match, na.rm = TRUE)
+  ) %>%
+  mutate(
+    PlotLabel = ifelse(
+      Cluster == 11 & !is.na(arm_match) & arm_count >= 2,
+      arm_match,
+      PlotLabel
+    ),
+    
+    fill = ifelse(
+      Cluster == 11 & !is.na(arm_match) & arm_count >= 2,
+      "ARMADA",
+      fill
+    )
+  ) %>%
+  ungroup() %>%
+  select(-arm_match, -arm_count)
+
+# ##Saving annotations as a supplementary table
+# SuppDataDFToSave<-AllFuncWithMolClade[,c(1:5,9,30:32,36:38,40,41)]
+# colnames(SuppDataDFToSave)[c(1,3,4,5,7:9)]<-c("Tree_representative","ContigID","ProteinID","gene_type","start","end","strand")
+# write.table(SuppDataDFToSave, "./data/Supplementary_table_2_DruantiaIII_genomic_contexts_20k.tsv",
+#             sep="\t",
+#             row.names = F,
+#             quote = F)
+
+############################################################################
+###Let's draw figures per cluster for each neighborhood
+#cluster colors
+myclustercolors<-c("#a6cee3","#1f78b4","#b2df8a",
+                   "#33a02c","#fb9a99","#e31a1c",
+                   "#8c510a","#ff7f00","#cab2d6",
+                   "#ffff99","#6a3d9a","#fdbf6f",
+                   "#00441b","#dfc27d","#4d4d4d")
+names(myclustercolors)<-unique(DruE3clades$Cluster)
+
+##
+TipColorDF<-data.frame(label=DruE3TreeMidRoot$tip.label)
+TipColorDF$color<-ifelse(TipColorDF$label == "WP_020219138.1", "ECOR19", "")
+
+TipColorScheme<-c("#cb181d", "#636363")
+names(TipColorScheme)<-c("ECOR19","")
+
+DrawClusterContexts<-function(cluster)
+{
+  #cluster<-11
+  #subset tree
+  Node<-subset(DruE3NodeOfInterest, DruE3NodeOfInterest$Cluster ==cluster)$ClMRCA
+  subtree<-extract.clade(DruE3TreeMidRoot, node = Node)
+  DruE3BasicWBt<-ggtree(subtree,
+                        size=.5,
+                        color="#636363") +
+    #geom_tiplab()+
+    geom_hilight(node=getMRCA(subtree,subtree$tip.label),fill = myclustercolors[cluster],
+                 alpha=0.2,
+                 extend=.35) +
+    scale_fill_manual(values=myclustercolors,name="Cluster") +
+    new_scale_fill()
+  
+  DruE3BasicTreePlot<- DruE3BasicWBt %<+%  TipColorDF +
+    geom_tippoint(aes(colour=color),size=1)+
+    scale_colour_manual(values=TipColorScheme, guide="none")+
+    theme_tree() 
+  
+  leaf_order<-DruE3BasicTreePlot$data %>%
+    filter(isTip) %>% arrange (y)
+  
+  ###
+  GenesToPlotCluster<-subset(AllFuncWithMolClade,AllFuncWithMolClade$target.name %in% subtree$tip.label)
+  
+  ##
+  essential_colors<-c("#377eb8","#4daf4a","#4daf4a","#ec7014","#e41a1c","#c6dbef")
+  names(essential_colors)<-c("druantia_type_III","tmRNA","tRNA","phage","integrase","plasmid")
+  allfillgroups<-unique(GenesToPlotCluster$fill)
+  other_groups <- setdiff(allfillgroups, names(essential_colors))
+  base_palette<-brewer.pal(9,"Set3")
+  extended_palette <- colorRampPalette(base_palette)(length(other_groups))
+  names(extended_palette)<-other_groups
+  combinedcolors<-c(essential_colors,extended_palette)
+  ##
+  #trying to create compatible coordinates between samples
+  #the idea is to align everything on DruE
+  DruE3CoordFP<-subset(GenesToPlotCluster,
+                       GenesToPlotCluster$protein.name == "DruE3")
+  #DruE3CoordFP$middle<-DruE3CoordFP$Gstart + (DruE3CoordFP$Gend-DruE3CoordFP$Gstart)/2
+  #I want to flip the ones that have other orientation
+  DruE3CoordFP<-DruE3CoordFP%>%group_by(target.name) %>%
+    mutate(middle = Gstart +(Gend-Gstart)/2)
+  GenesToPlotNC<-merge(GenesToPlotCluster, DruE3CoordFP[,c(1,34,42)], by= "target.name")
+  GenesToPlotNC$target.name<-factor(GenesToPlotNC$target.name, levels = leaf_order$label)
+  GenesToPlotNC$pstart<-ifelse(GenesToPlotNC$ggstrand.y,
+                               GenesToPlotNC$Gstart - GenesToPlotNC$middle,
+                               GenesToPlotNC$middle - GenesToPlotNC$Gend)
+  GenesToPlotNC$pend<-ifelse(GenesToPlotNC$ggstrand.y,
+                             GenesToPlotNC$Gend - GenesToPlotNC$middle,
+                             GenesToPlotNC$middle - GenesToPlotNC$Gstart)
+  GenesToPlotNC$pstrand<-ifelse(GenesToPlotNC$ggstrand.y,
+                                GenesToPlotNC$ggstrand.x,
+                                !GenesToPlotNC$ggstrand.x)
+  colnames(GenesToPlotNC)[1]<-"molecule"
+  
+  ###finally ploting
+  GenesPlot<-ggplot(data = GenesToPlotNC,
+                    aes(y =  molecule,
+                        xmin = pstart,
+                        xmax = pend))+ 
+    geom_hline(aes(yintercept = molecule),
+               linewidth =.5, color ="#bdbdbd")+
+    geom_gene_arrow(aes(fill = fill,
+                        forward=pstrand))+
+    geom_gene_label(aes(label=PlotLabel))+
+    scale_fill_manual(values = combinedcolors, na.value="white", name ="")+
+    theme_tree()+
+    theme(legend.position = "right")
+    
+p<-GenesPlot %>% insert_left(DruE3BasicTreePlot, width =.1)
+
+  
+  ggsave(paste0("DruE_Cl",cluster,"_neighborhoods_and_HGT_20000.pdf"),
+         plot=p,
+         path = "./figures/DruantiaIII_neighborhoods/",
+         width=50,
+         height = ifelse(length(leaf_order$label)/2 <=10,
+                         12,
+                         length(leaf_order$label)/2),
+         limitsize = F,
+         units="cm",
+         dpi=300)
+}
+####Save plots for all clusters
+for(i in unique(AllFuncWithMolClade$Cluster))
+{
+  DrawClusterContexts(i)
+}
+
+
+###########################################
+####Do domain analysis
+################################
+# #The simple
+# DomainRankings<-AllFunctionalAnnoNoDupl |> group_by(HMM_Annot_IDs) |>
+#   summarise (n = n()) |>
+#   arrange(desc(n))
+# #methylases are common
+
+
+
+#In reality I have to do that by clade and by not merging the domains
+##Merge PFAM with GFF
+PFAMinSelectedRegions<-merge(AllFuncWithMol[,c(1:2,4:8,11)],
+                             PFAMdata[,c(2:18)],
+                             by.x =  c("GenomeID","target.name"), by.y = c("GenomeID","seq_id"), all.x = T)
+PFAMinSelectedRegionsWClades<-merge(PFAMinSelectedRegions,
+                                    DruE3clades, by.x = "target.name", by.y = "Sequence", all.x = T)
+
+DruEClusterSizes<-DruE3clades |> group_by(Cluster) |> summarise(ClSize = n())
+#Removing domains found in DruE3 and DruH3, and only keeping neighboring ones
+PFAMinSelectedRegionsWCladesNoDru<-subset(PFAMinSelectedRegionsWClades,
+                                          PFAMinSelectedRegionsWClades$system != "druantia_type_III")
+DomainRankingsByClade<-PFAMinSelectedRegionsWCladesNoDru |> group_by(Cluster,hmm_name,PFAMID, clan) |>
+  summarise (n = n()) |>
+  arrange(desc(n)) 
+
+DomainRankingsByCladeNoNA<-DomainRankingsByClade  %>% drop_na()
+
+DomainRankingsByCladeWSize<-merge(DomainRankingsByCladeNoNA, DruEClusterSizes, by = "Cluster", all.x =T)
+
+DruEMostCommonDomainsByClade<-subset(DomainRankingsByCladeWSize, DomainRankingsByCladeWSize$n > DomainRankingsByCladeWSize$ClSize*.4)
+###I want to add empty clusters
+DruEMostCommonDomainsByCladeAllClusters<-merge(DruEMostCommonDomainsByClade, DruEClusterSizes,
+                                               by=c("Cluster","ClSize"), all.y = T)
+DruEMostCommonDomainsByCladeAllClusters$perc<-DruEMostCommonDomainsByCladeAllClusters$n*100/DruEMostCommonDomainsByCladeAllClusters$ClSize
+DruEMostCommonDomainsByCladeAllClusters$hmm_name[is.na(DruEMostCommonDomainsByCladeAllClusters$hmm_name)] <- ""
+DruEMostCommonDomainsByCladeAllClusters$ClusterHeader<-paste0("Clade ",DruEMostCommonDomainsByCladeAllClusters$Cluster, " n=", 
+                                                              DruEMostCommonDomainsByCladeAllClusters$ClSize)
+DruEMostCommonDomainsByCladeAllClusters$ClusterHeader<-factor(DruEMostCommonDomainsByCladeAllClusters$ClusterHeader,
+                                                              levels= unique(DruEMostCommonDomainsByCladeAllClusters$ClusterHeader))
+
+#Plot  
+
+DruantiaIIIDomainsInNeib<-ggplot(data=DruEMostCommonDomainsByCladeAllClusters,
+                                 aes(x = hmm_name, y = perc, fill = clan)) +
+  geom_col() +
+  facet_wrap(~ ClusterHeader, ncol =5)+#, scales = "free_y")+
+  theme_classic()+
+  ylab("%")+
+  theme(axis.text.x = element_text(angle =90, vjust =.5, hjust =1))+
+  scale_fill_manual(values=c("#a6cee3","#1f78b4","#b2df8a","#33a02c",
+                             "#fb9a99","#e31a1c","#fdbf6f","#ff7f00",
+                             "#cab2d6","#6a3d9a"), na.translate=FALSE)
+
+DruantiaIIIDomainsInNeib
+ggsave("DruE_domains_in_neighborhood_40p_20000.pdf",
+       path=FiguresAndDataFolder,
+       plot=DruantiaIIIDomainsInNeib,
+       width=24, height=15,
+       limitsize = F,
+       units="cm",
+       dpi=300)
+####Also I want to figure out how many of those has some kinds of tRNAs nearby...
+####For the ones that I have it, I will pull all the genomes to look at the gene contexts and try to reconstruct whole the cargo that is there
+NonCDSgenesIntegrase<-subset(GenesToPlotNC, GenesToPlotNC$X3 !="CDS" |
+                               GenesToPlotNC$phage == "Integrase")
+
+NonCDSgenesWClade<-merge(NonCDSgenesIntegrase, DruE3clades, by.x = "molecule", by.y = "Sequence")
+NonCDSgenesWCladeCounts<-merge(NonCDSgenesWClade, DruEClusterSizes, by = "Cluster")
+NonCDSgenesWCladeCounts$ClusterHeader<-paste0("Clade ",NonCDSgenesWCladeCounts$Cluster, " n=", 
+                                              NonCDSgenesWCladeCounts$ClSize)
+NonCDSgenesWCladeCounts$ClusterHeader<-factor(NonCDSgenesWCladeCounts$ClusterHeader,
+                                              levels= unique(NonCDSgenesWCladeCounts$ClusterHeader))
+NonCDSgenesWCladeCounts$GeneLabels<-ifelse(NonCDSgenesWCladeCounts$X3 == "riboswitch",
+                                           "riboswitch",
+                                           ifelse(NonCDSgenesWCladeCounts$X3 =="CDS",
+                                                  "Integrase",
+                                                  NonCDSgenesWCladeCounts$Agene)
+)
+NonCDSgenesWCladeCounts$GeneLabelsSimp<-ifelse(NonCDSgenesWCladeCounts$X3 == "sequence_feature",
+                                               NonCDSgenesWCladeCounts$Agene,
+                                               ifelse(NonCDSgenesWCladeCounts$X3 =="CDS",
+                                                      "Integrase",
+                                                      NonCDSgenesWCladeCounts$X3)
+)
+#plot
+DruIIIMobilitySimp<-ggplot(NonCDSgenesWCladeCounts, aes(x = GeneLabelsSimp, fill = color))+
+  geom_histogram(stat = "count") +
+  facet_wrap(~ClusterHeader, scales = "free_y")+
+  theme_classic()+
+  ylab("count")+
+  xlab("")+
+  theme(axis.text.x = element_text(angle =90, vjust =.5, hjust =1))
+DruIIIMobilitySimp
+ggsave("DruIII_integrase_RNAs_in_neighborhood_simple_20000.pdf",
+       path=FiguresAndDataFolder,
+       plot=DruIIIMobilitySimp,
+       width=24, height=15,
+       limitsize = F,
+       units="cm",
+       dpi=300)
+###So indeed there are more promising classes aside from Clade 11
+###Clade1 (has tRNAs and tmRNAs),Clade2, Clade6 (t and tm), 
+###Clade12, Clade13 (also has rRNAs), Clade14 (has tRNAs in less than half cases)
+###Clade1 & 12 are less spread out and had mostly representatives from Vibrio
+###Clade2 is also multiple species, so it might be interesting
+###Clade14 can be interesting because it is soil bacteria, and they might have something very different
+
+DruIIIMobility<-ggplot(NonCDSgenesWCladeCounts, aes(x = GeneLabels, fill = color))+
+  geom_histogram(stat = "count") +
+  facet_wrap(~ClusterHeader, scales = "free_y")+
+  theme_classic()+
+  ylab("count")+
+  xlab("")+
+  theme(axis.text.x = element_text(angle =90, vjust =.5, hjust =1),
+        legend.position = "bottom")
+DruIIIMobility
+ggsave("DruIII_integrase_RNAs_in_neighborhood_20000.pdf",
+       path=FiguresAndDataFolder,
+       plot=DruIIIMobility,
+       width=35, height=19,
+       limitsize = F,
+       units="cm",
+       dpi=300)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 AllFuncWithMol<-merge(AllFunctionalAnnoNoDupl[,c(1,2,3,9,17,18,23:27)], UniqDru3Borders[,c(3,5,21)],
@@ -310,95 +753,95 @@ DruE3MetadataPADLOCbyWp$log10Count<-0.1+log10(DruE3MetadataPADLOCbyWp$Count)
 DruE3MetadataPADLOCbyWp$Genus<-factor(DruE3MetadataPADLOCbyWp$Genus, 
                                       levels=c(TopGenus, 'Else'))
 
-#################################################################
-########################################
-###Plotting Genomad data on the DruE phylogenetic tree
-DruE3padlocDfWithClRepr<-subset(DruE3padlocDfWithCl,
-                                DruE3padlocDfWithCl$GenomeID %in% Dru3ReprGenomes$V1)
-
-DruE3padlocDfWithClRepr$SystemID<-sapply(strsplit(DruE3padlocDfWithClRepr$V1.x, ".csv:", fixed=TRUE), 
-                                         tail, 1)
-##Plasmids
-pathtogenomadfolder<-"../20250424_DruantiIII_neighborhoods_genomad/genomad_output/"
-filelistgenomadplasmid = list.files(pattern="\\plasmid_summary.tsv$",
-                                    recursive = T,
-                                    path = pathtogenomadfolder)
-setwd(paste0(mainpath,"/",pathtogenomadfolder))
-GenomadResultsPlasmids<-readr::read_tsv(filelistgenomadplasmid, id="file_name")
-setwd(mainpath)
-GenomadResultsPlasmids<-separate(data =  GenomadResultsPlasmids,
-                                 col = file_name,
-                                 into=c("GenomeID",NA,NA),
-                                 sep="/")
-colnames(GenomadResultsPlasmids)[2]<-"ID"
-
-DruWithGenomadPlasmid<-merge(DruE3padlocDfWithClRepr,
-                             GenomadResultsPlasmids,
-                             by.x= c("GenomeID","V2"),
-                             by.y= c("GenomeID","ID"),
-                             all.x =T)
-nrow(subset(DruWithGenomadPlasmid, !is.na(DruWithGenomadPlasmid$length)))
-DruGenomadPlSh<-DruWithGenomadPlasmid[,c(1:3,5,8,23,27)]
-colnames(DruGenomadPlSh)[7]<-"GenomadPlasmidScore"
-
-#########################
-#viruses
-filelistgenomadvirus = list.files(pattern="\\virus_summary.tsv$",
-                                  recursive = T,
-                                  path = pathtogenomadfolder)
-setwd(paste0(mainpath,"/",pathtogenomadfolder))
-GenomadResultsViruses<-readr::read_tsv(filelistgenomadvirus, id="file_name")
-setwd(mainpath)
-
-GenomadResultsViruses<-separate(data = GenomadResultsViruses,
-                                col = file_name,
-                                into=c("GenomeID",NA,NA),
-                                sep="/")
-GenomadResultsViruses<-separate(data = GenomadResultsViruses,
-                                col = seq_name,
-                                into=c("ID","Provirus"),
-                                sep="\\|", remove = F)
-GenomadResultsViruses<-separate(data = GenomadResultsViruses,
-                                col = coordinates,
-                                into=c("Start","End"),
-                                sep="\\-")
-
-#it is essential to convert to numbers here, because otherwise it is interpreted as string
-GenomadResultsViruses$Start<-as.integer(GenomadResultsViruses$Start)
-GenomadResultsViruses$End<-as.integer(GenomadResultsViruses$End)
-
-GenomadResultsVirusesCons<-subset(GenomadResultsViruses,
-                                  GenomadResultsViruses$virus_score > .8)
-
-
-PreGenomadVirusesOnTmnContigs<-merge(DruE3padlocDfWithClRepr,
-                                     GenomadResultsVirusesCons, by.x =c("GenomeID","V2"),
-                                     by=c("GenomeID","ID"))
-PreGenomadVirusesOnTmnContigs$InProphage<-ifelse((PreGenomadVirusesOnTmnContigs$V12 >= PreGenomadVirusesOnTmnContigs$Start) & 
-                                                   (PreGenomadVirusesOnTmnContigs$V13 <= PreGenomadVirusesOnTmnContigs$End) &
-                                                   (PreGenomadVirusesOnTmnContigs$V13 <= PreGenomadVirusesOnTmnContigs$End) & 
-                                                   (PreGenomadVirusesOnTmnContigs$V13 >= PreGenomadVirusesOnTmnContigs$Start),
-                                                 1,0)
-
-GenomadVirusesOnDruContigs<-subset(PreGenomadVirusesOnTmnContigs,
-                                   InProphage == 1)
-
-
-##merging plasmid and Viral data
-DruVirPlas<-merge(DruGenomadPlSh,
-                  GenomadVirusesOnDruContigs[,c(1:3,35,31,26:28)],
-                  all.x =T,
-                  by = c("GenomeID","V2","V4"))
-#####
-DruVirPlas$InProphage<-ifelse(DruVirPlas$virus_score>0, 1, 0)
-DruVirPlas$InPlasmid<-ifelse(DruVirPlas$length>0, 4, 0)
-MGEDataForPlot<-DruVirPlas[,c("V4","InPlasmid","InProphage")]
-colnames(MGEDataForPlot)[2:3]<-c(1,2)
-MGEDataForPlot[is.na(MGEDataForPlot)]<-0
-MGEDataForPlotLong<-gather(MGEDataForPlot,
-                           key = "Location", value = "Prediction", 2:3)
-names(MGEDataForPlotLong)[1]<-'molecule'
-MGEDataForPlotLong$Location<-as.integer(MGEDataForPlotLong$Location)
+# #################################################################
+# ########################################
+# ###Plotting Genomad data on the DruE phylogenetic tree
+# DruE3padlocDfWithClRepr<-subset(DruE3padlocDfWithCl,
+#                                 DruE3padlocDfWithCl$GenomeID %in% Dru3ReprGenomes$V1)
+# 
+# DruE3padlocDfWithClRepr$SystemID<-sapply(strsplit(DruE3padlocDfWithClRepr$V1.x, ".csv:", fixed=TRUE), 
+#                                          tail, 1)
+# ##Plasmids
+# pathtogenomadfolder<-"../20250424_DruantiIII_neighborhoods_genomad/genomad_output/"
+# filelistgenomadplasmid = list.files(pattern="\\plasmid_summary.tsv$",
+#                                     recursive = T,
+#                                     path = pathtogenomadfolder)
+# setwd(paste0(mainpath,"/",pathtogenomadfolder))
+# GenomadResultsPlasmids<-readr::read_tsv(filelistgenomadplasmid, id="file_name")
+# setwd(mainpath)
+# GenomadResultsPlasmids<-separate(data =  GenomadResultsPlasmids,
+#                                  col = file_name,
+#                                  into=c("GenomeID",NA,NA),
+#                                  sep="/")
+# colnames(GenomadResultsPlasmids)[2]<-"ID"
+# 
+# DruWithGenomadPlasmid<-merge(DruE3padlocDfWithClRepr,
+#                              GenomadResultsPlasmids,
+#                              by.x= c("GenomeID","V2"),
+#                              by.y= c("GenomeID","ID"),
+#                              all.x =T)
+# nrow(subset(DruWithGenomadPlasmid, !is.na(DruWithGenomadPlasmid$length)))
+# DruGenomadPlSh<-DruWithGenomadPlasmid[,c(1:3,5,8,23,27)]
+# colnames(DruGenomadPlSh)[7]<-"GenomadPlasmidScore"
+# 
+# #########################
+# #viruses
+# filelistgenomadvirus = list.files(pattern="\\virus_summary.tsv$",
+#                                   recursive = T,
+#                                   path = pathtogenomadfolder)
+# setwd(paste0(mainpath,"/",pathtogenomadfolder))
+# GenomadResultsViruses<-readr::read_tsv(filelistgenomadvirus, id="file_name")
+# setwd(mainpath)
+# 
+# GenomadResultsViruses<-separate(data = GenomadResultsViruses,
+#                                 col = file_name,
+#                                 into=c("GenomeID",NA,NA),
+#                                 sep="/")
+# GenomadResultsViruses<-separate(data = GenomadResultsViruses,
+#                                 col = seq_name,
+#                                 into=c("ID","Provirus"),
+#                                 sep="\\|", remove = F)
+# GenomadResultsViruses<-separate(data = GenomadResultsViruses,
+#                                 col = coordinates,
+#                                 into=c("Start","End"),
+#                                 sep="\\-")
+# 
+# #it is essential to convert to numbers here, because otherwise it is interpreted as string
+# GenomadResultsViruses$Start<-as.integer(GenomadResultsViruses$Start)
+# GenomadResultsViruses$End<-as.integer(GenomadResultsViruses$End)
+# 
+# GenomadResultsVirusesCons<-subset(GenomadResultsViruses,
+#                                   GenomadResultsViruses$virus_score > .8)
+# 
+# 
+# PreGenomadVirusesOnTmnContigs<-merge(DruE3padlocDfWithClRepr,
+#                                      GenomadResultsVirusesCons, by.x =c("GenomeID","V2"),
+#                                      by=c("GenomeID","ID"))
+# PreGenomadVirusesOnTmnContigs$InProphage<-ifelse((PreGenomadVirusesOnTmnContigs$V12 >= PreGenomadVirusesOnTmnContigs$Start) & 
+#                                                    (PreGenomadVirusesOnTmnContigs$V13 <= PreGenomadVirusesOnTmnContigs$End) &
+#                                                    (PreGenomadVirusesOnTmnContigs$V13 <= PreGenomadVirusesOnTmnContigs$End) & 
+#                                                    (PreGenomadVirusesOnTmnContigs$V13 >= PreGenomadVirusesOnTmnContigs$Start),
+#                                                  1,0)
+# 
+# GenomadVirusesOnDruContigs<-subset(PreGenomadVirusesOnTmnContigs,
+#                                    InProphage == 1)
+# 
+# 
+# ##merging plasmid and Viral data
+# DruVirPlas<-merge(DruGenomadPlSh,
+#                   GenomadVirusesOnDruContigs[,c(1:3,35,31,26:28)],
+#                   all.x =T,
+#                   by = c("GenomeID","V2","V4"))
+# #####
+# DruVirPlas$InProphage<-ifelse(DruVirPlas$virus_score>0, 1, 0)
+# DruVirPlas$InPlasmid<-ifelse(DruVirPlas$length>0, 4, 0)
+# MGEDataForPlot<-DruVirPlas[,c("V4","InPlasmid","InProphage")]
+# colnames(MGEDataForPlot)[2:3]<-c(1,2)
+# MGEDataForPlot[is.na(MGEDataForPlot)]<-0
+# MGEDataForPlotLong<-gather(MGEDataForPlot,
+#                            key = "Location", value = "Prediction", 2:3)
+# names(MGEDataForPlotLong)[1]<-'molecule'
+# MGEDataForPlotLong$Location<-as.integer(MGEDataForPlotLong$Location)
 
 TipColorDF<-data.frame(label=DruE3TreeMidRoot$tip.label)
 TipColorDF$color<-ifelse(TipColorDF$label == "WP_020219138.1", "ECOR19", "")
