@@ -13,6 +13,7 @@ library(ggnewscale)
 library(tidyr)
 library(this.path)
 library(RColorBrewer)
+library(ggh4x)
 ###################
 mainpath<-paste0(dirname(this.path()),"/../")
 setwd(mainpath)
@@ -567,9 +568,73 @@ ggsave("DruantiaIII_neighborhoods_Summary_20k_column.pdf",
        units="cm",
        dpi=300)
 
-##########################
-##########################
+####################################################
+#Draw representative neighborhoods for each cluster
 
+RepresentativeGenomesList<-c("GCF_900044045.1","GCF_003730115.1","GCF_000785575.1",
+                             "GCF_001005725.1",
+                         "GCF_001557765.1","GCF_001586155.1","GCF_002174125.1","GCF_002875665.1",
+                         "GCF_900168205.1",
+                         "GCF_003047145.2",
+                         "GCF_008806955.1",
+                         "GCF_000380185.1",
+                         "GCF_020694005.1", "GCF_014652135.1","GCF_020447145.1")
+
+RepresentativeGenomes<-subset(AllFuncWithMolClade,
+                              AllFuncWithMolClade$GenomeID %in% RepresentativeGenomesList)
+RepresentativeGenomes$fill<-gsub("_"," ",RepresentativeGenomes$fill)
+###now let's recalculate gene starts so everything aligns well
+allfillgroupsrepr<-unique(RepresentativeGenomes$fill[!is.na(RepresentativeGenomes$fill)])
+other_groupsrepr <- setdiff(allfillgroupsrepr, names(essential_colors))
+base_palette<-brewer.pal(9,"Set3")
+extended_paletterepr <- colorRampPalette(base_palette)(length(other_groupsrepr))
+names(extended_paletterepr)<-other_groupsrepr
+combinedcolorsrepr<-c(essential_colors,extended_paletterepr)
+
+RepresentativeGenomes$header<-paste0("Cluster ", RepresentativeGenomes$Cluster)
+RepresentativeGenomes$header<-factor(RepresentativeGenomes$header,
+                                     levels = unique(
+                                       RepresentativeGenomes[order(RepresentativeGenomes$Cluster),]$header))
+
+###finally ploting
+ReprGenesPlot<-ggplot(data = RepresentativeGenomes,
+                  aes(y =  GenomeID,
+                      xmin = Gstart,
+                      xmax = Gend))+ 
+  geom_hline(aes(yintercept = GenomeID),
+             linewidth =.5, color="#bdbdbd")+
+  geom_gene_arrow(aes(fill = fill,
+                      forward=ggstrand),
+                  arrowhead_height = unit(6, "mm"),
+                  arrow_body_height = unit(6, "mm"),
+                  arrowhead_width = unit(2, "mm"))+
+  geom_gene_label(aes(label=PlotLabel))+
+  facet_wrap2(~ header, scales = "free", ncol=1,
+              strip = strip_themed(
+                background_x = elem_list_rect(fill = scales::alpha(myclustercolors, 0.4))
+              ))+
+  ylab("")+
+  scale_fill_manual(values = combinedcolorsrepr, 
+                    na.value="white", name ="",
+                    guide = guide_legend(ncol = 1),
+                    breaks = names(combinedcolorsrepr))+
+  theme_minimal()+
+  theme(legend.position = "right",
+        axis.text.y = element_text(size = 12, color ="black"))
+ReprGenesPlot
+
+#save
+ggsave("DruantiaIII_neighborhoods_20k_representative_genomes.pdf",
+       plot=ReprGenesPlot,
+       path = "./figures/DruantiaIII_neighborhoods/",
+       width=45,
+       height = 32,
+       units="cm",
+       dpi=300)
+
+
+###################
+#Update domain story that I was showing before
 
 
 
