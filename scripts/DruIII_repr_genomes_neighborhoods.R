@@ -5,7 +5,7 @@ library(ggplot2)
 library(gggenes)
 library(ggtree)
 library(ggpubr)
-#library(aplot)
+library(aplot)
 library(ape)
 library(phytools)
 library(scales)
@@ -173,20 +173,6 @@ PFAMdatashort<-PFAMdata %>% group_by(GenomeID,seq_id) %>%
             PHMM_names = paste(unique(hmm_name), collapse = ";"),
             .groups = "drop")
 
-# ###PFAM phage associated domains
-# PFAMPhage<-read.csv("PFAM_list_of_Phage_domains_fromRoman.tsv",
-#                     sep="\t", header=F)
-# PFAMPhage$IsPhage<-rep("Ph", length(PFAMPhage$V1))
-# ##
-# PFAMdataWPhage<-merge(PFAMdata,PFAMPhage[,c(1,4)],
-#                       by.x="PFAMID", by.y = "V1", all.x =T)
-# 
-# PFAMdataMDom<-PFAMdataWPhage %>% group_by(GenomeID,seq_id) %>%
-#   fill(IsPhage) %>%
-#   summarise(name=str_c(unique(hmm_name), collapse="/"),
-#             phage = unique(IsPhage))
-# names(PFAMdataMDom)[2]<-"ID"
-
 ##Merge PFAM with GFF
 GFFwPFAMofInterest<-merge(GFFSelectedRegionsDF[,c(1,2,5,6,7,9,12,13,14,15)],
                           PFAMdatashort,
@@ -342,6 +328,7 @@ AllFunctionalAnnoNoDupl$fill<-ifelse(AllFunctionalAnnoNoDupl$PlotLabel %in% c("D
                                                           ifelse(!is.na(AllFunctionalAnnoNoDupl$activity) &
                                                                    AllFunctionalAnnoNoDupl$activity == "Antidefense",
                                                                  "Antidefense",
+                                                                 ifelse(!is.na(AllFunctionalAnnoNoDupl$subtype),AllFunctionalAnnoNoDupl$subtype,
                                                                  ifelse(AllFunctionalAnnoNoDupl$Integrase,
                                                                         "integrase",
                                                                         ifelse(!is.na(AllFunctionalAnnoNoDupl$genomad_specificity_class),
@@ -352,7 +339,7 @@ AllFunctionalAnnoNoDupl$fill<-ifelse(AllFunctionalAnnoNoDupl$PlotLabel %in% c("D
                                                                                              NA)
                                                                                ),
                                                                                NA)
-                                                                 ))))))
+                                                                 )))))))
 AllFunctionalAnnoNoDupl$X3<-ifelse(is.na(AllFunctionalAnnoNoDupl$X3),
                                   "CDS",AllFunctionalAnnoNoDupl$X3)
 
