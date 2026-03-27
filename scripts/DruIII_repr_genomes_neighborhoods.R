@@ -633,26 +633,17 @@ ggsave("DruantiaIII_neighborhoods_20k_representative_genomes.pdf",
        dpi=300)
 
 
-###################
-#Update domain story that I was showing before
-
-
-
-
-
-
-#In reality I have to do that by clade and by not merging the domains
+#############################
+#Look at the individual domains
 ##Merge PFAM with GFF
-PFAMinSelectedRegions<-merge(AllFuncWithMol[,c(1:2,4:8,11)],
+PFAMinSelectedRegions<-merge(AllFuncWithMolClade[,c(1:4,24,41)],
                              PFAMdata[,c(2:18)],
-                             by.x =  c("GenomeID","target.name"), by.y = c("GenomeID","seq_id"), all.x = T)
-PFAMinSelectedRegionsWClades<-merge(PFAMinSelectedRegions,
-                                    DruE3clades, by.x = "target.name", by.y = "Sequence", all.x = T)
+                             by.x =  c("GenomeID","ID"), by.y = c("GenomeID","seq_id"), all.x = T)
 
 DruEClusterSizes<-DruE3clades |> group_by(Cluster) |> summarise(ClSize = n())
 #Removing domains found in DruE3 and DruH3, and only keeping neighboring ones
-PFAMinSelectedRegionsWCladesNoDru<-subset(PFAMinSelectedRegionsWClades,
-                                          PFAMinSelectedRegionsWClades$system != "druantia_type_III")
+PFAMinSelectedRegionsWCladesNoDru<-subset(PFAMinSelectedRegions,
+                                          PFAMinSelectedRegions$system != "druantia_type_III")
 DomainRankingsByClade<-PFAMinSelectedRegionsWCladesNoDru |> group_by(Cluster,hmm_name,PFAMID, clan) |>
   summarise (n = n()) |>
   arrange(desc(n)) 
@@ -661,21 +652,25 @@ DomainRankingsByCladeNoNA<-DomainRankingsByClade  %>% drop_na()
 
 DomainRankingsByCladeWSize<-merge(DomainRankingsByCladeNoNA, DruEClusterSizes, by = "Cluster", all.x =T)
 
-DruEMostCommonDomainsByClade<-subset(DomainRankingsByCladeWSize, DomainRankingsByCladeWSize$n > DomainRankingsByCladeWSize$ClSize*.4)
-###I want to add empty clusters
-DruEMostCommonDomainsByCladeAllClusters<-merge(DruEMostCommonDomainsByClade, DruEClusterSizes,
-                                               by=c("Cluster","ClSize"), all.y = T)
-DruEMostCommonDomainsByCladeAllClusters$perc<-DruEMostCommonDomainsByCladeAllClusters$n*100/DruEMostCommonDomainsByCladeAllClusters$ClSize
-DruEMostCommonDomainsByCladeAllClusters$hmm_name[is.na(DruEMostCommonDomainsByCladeAllClusters$hmm_name)] <- ""
-DruEMostCommonDomainsByCladeAllClusters$ClusterHeader<-paste0("Clade ",DruEMostCommonDomainsByCladeAllClusters$Cluster, " n=", 
-                                                              DruEMostCommonDomainsByCladeAllClusters$ClSize)
-DruEMostCommonDomainsByCladeAllClusters$ClusterHeader<-factor(DruEMostCommonDomainsByCladeAllClusters$ClusterHeader,
-                                                              levels= unique(DruEMostCommonDomainsByCladeAllClusters$ClusterHeader))
+DruEMostCommonDomainsByCladeList<-unique(subset(DomainRankingsByCladeWSize, DomainRankingsByCladeWSize$n > DomainRankingsByCladeWSize$ClSize*.33)$hmm_name)
 
+
+DruEMostCommonDomainsForPlot<-subset(DomainRankingsByCladeWSize,
+                                     DomainRankingsByCladeWSize$hmm_name %in% DruEMostCommonDomainsByCladeList)
+
+DruEMostCommonDomainsForPlot$perc<-DruEMostCommonDomainsForPlot$n*100/DruEMostCommonDomainsForPlot$ClSize
+#DruEMostCommonDomainsByCladeAllClusters$hmm_name[is.na(DruEMostCommonDomainsByCladeAllClusters$hmm_name)] <- ""
+DruEMostCommonDomainsForPlot$ClusterHeader<-paste0("Clade ",DruEMostCommonDomainsForPlot$Cluster, " n=", 
+                                                   DruEMostCommonDomainsForPlot$ClSize)
+DruEMostCommonDomainsForPlot$ClusterHeader<-factor(DruEMostCommonDomainsForPlot$ClusterHeader,
+                                                              levels= unique(DruEMostCommonDomainsForPlot$ClusterHeader))
+DruEMostCommonDomainsForPlot$xlabel<-paste0(DruEMostCommonDomainsForPlot$PFAMID,
+                                                      " (",
+                                            DruEMostCommonDomainsForPlot$hmm_name,")")
 #Plot  
 
-DruantiaIIIDomainsInNeib<-ggplot(data=DruEMostCommonDomainsByCladeAllClusters,
-                                 aes(x = hmm_name, y = perc, fill = clan)) +
+DruantiaIIIDomainsInNeib<-ggplot(data=DruEMostCommonDomainsForPlot,
+                                 aes(x = xlabel, y = perc, fill = clan)) +
   geom_col() +
   facet_wrap(~ ClusterHeader, ncol =5)+#, scales = "free_y")+
   theme_classic()+
@@ -686,13 +681,17 @@ DruantiaIIIDomainsInNeib<-ggplot(data=DruEMostCommonDomainsByCladeAllClusters,
                              "#cab2d6","#6a3d9a"), na.translate=FALSE)
 
 DruantiaIIIDomainsInNeib
-ggsave("DruE_domains_in_neighborhood_40p_20000.pdf",
+ggsave("DruE_domains_in_neighborhood_33p_20000.pdf",
        path=FiguresAndDataFolder,
        plot=DruantiaIIIDomainsInNeib,
        width=24, height=15,
        limitsize = F,
        units="cm",
        dpi=300)
+
+
+
+
 ####Also I want to figure out how many of those has some kinds of tRNAs nearby...
 ####For the ones that I have it, I will pull all the genomes to look at the gene contexts and try to reconstruct whole the cargo that is there
 NonCDSgenesIntegrase<-subset(GenesToPlotNC, GenesToPlotNC$X3 !="CDS" |
