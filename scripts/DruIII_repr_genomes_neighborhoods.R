@@ -318,6 +318,8 @@ AllFunctionalAnnoNoDupl$fill<-ifelse(AllFunctionalAnnoNoDupl$PlotLabel %in% c("D
                                      "druantia_type_III",
                                      ifelse(AllFunctionalAnnoNoDupl$PlotLabel == "ZorE2",
                                             "ZorE",
+                                            ifelse(AllFunctionalAnnoNoDupl$PlotLabel == "WYL",
+                                                   "WYL",
                                             ifelse(AllFunctionalAnnoNoDupl$X3 != "CDS",
                                                    ifelse(AllFunctionalAnnoNoDupl$X3 =="sequence_feature",
                                                           NA,
@@ -339,7 +341,7 @@ AllFunctionalAnnoNoDupl$fill<-ifelse(AllFunctionalAnnoNoDupl$PlotLabel %in% c("D
                                                                                              NA)
                                                                                ),
                                                                                NA)
-                                                                 )))))))
+                                                                 ))))))))
 AllFunctionalAnnoNoDupl$X3<-ifelse(is.na(AllFunctionalAnnoNoDupl$X3),
                                   "CDS",AllFunctionalAnnoNoDupl$X3)
 
@@ -473,7 +475,10 @@ DrawClusterContexts<-function(cluster)
     geom_hline(aes(yintercept = molecule),
                linewidth =.5, color ="#bdbdbd")+
     geom_gene_arrow(aes(fill = fill,
-                        forward=pstrand))+
+                        forward=pstrand),
+                    arrowhead_height = unit(4, "mm"),
+                    arrow_body_height = unit(4, "mm"),
+                    arrowhead_width = unit(1, "mm"))+
     geom_gene_label(aes(label=PlotLabel))+
     scale_fill_manual(values = combinedcolors, na.value="white", name ="")+
     theme_tree()+
@@ -501,13 +506,73 @@ for(i in unique(AllFuncWithMolClade$Cluster))
 
 
 ###########################################
-####Do domain analysis
+####Do summary and domain analysis
 ################################
-# #The simple
-# DomainRankings<-AllFunctionalAnnoNoDupl |> group_by(HMM_Annot_IDs) |>
-#   summarise (n = n()) |>
-#   arrange(desc(n))
-# #methylases are common
+#####Let's start with summary by cluster
+#I use fill variable to describe essential classes
+
+cluster_counts <- AllFuncWithMolClade %>%
+  group_by(Cluster) %>%
+  summarise(n_target_unique = n_distinct(target.name), .groups = "drop")
+
+DrawCategoriesByCluster<-unique(AllFuncWithMolClade[,c("target.name","Cluster","GenomeID","seqid","fill")])%>% 
+  filter(!is.na(fill)) %>%
+  group_by(Cluster, fill) %>%
+  summarise(
+    fill_n = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(fill = gsub("_", " ", fill))%>%
+  left_join(cluster_counts, by = "Cluster")
+DrawCategoriesByCluster$percentage<-DrawCategoriesByCluster$fill_n*100/DrawCategoriesByCluster$n_target_unique
+#for plot I select only the ones that occur in 20% of genomes per cluster
+PercCutOff<-20
+allfillgroups<-unique(subset(DrawCategoriesByCluster,
+                             DrawCategoriesByCluster$percentage> PercCutOff)$fill)
+DrawCategoriesByClusterForPlot<-subset(DrawCategoriesByCluster,
+                                       DrawCategoriesByCluster$fill %in% allfillgroups)
+DrawCategoriesByClusterForPlot$header<-paste0("Cluster ",DrawCategoriesByClusterForPlot$Cluster," (n=",
+                                              DrawCategoriesByClusterForPlot$n_target_unique,
+                                              ")")
+DrawCategoriesByClusterForPlot$header<-factor(DrawCategoriesByClusterForPlot$header,
+                                                 levels = unique(
+                                                   DrawCategoriesByClusterForPlot[order(DrawCategoriesByClusterForPlot$Cluster),]$header))
+###repeat the coloring scheme to match the ones on the long plots
+essential_colors<-c("#377eb8","#4daf4a","#c51b8a","#c51b8a","#ec7014","#e41a1c","#c6dbef")
+names(essential_colors)<-c("druantia type III","ZorE","tmRNA","tRNA","phage","integrase","plasmid")
+other_groups <- setdiff(allfillgroups, names(essential_colors))
+base_palette<-brewer.pal(9,"Set3")
+extended_palette <- colorRampPalette(base_palette)(length(other_groups))
+names(extended_palette)<-other_groups
+Fillcombinedcolors<-c(essential_colors,extended_palette)
+#plot summary for defense systems
+SystemsSummary20k<-ggplot(data=DrawCategoriesByClusterForPlot, aes(x=fill, y =percentage, fill = fill))+
+  geom_col()+
+  facet_wrap(~header, ncol =5)+
+  scale_fill_manual(values = Fillcombinedcolors, name ="")+
+  ylab("% of genomes")+
+  xlab("")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 90,hjust =1, vjust =.5, size=12),
+        axis.text.y = element_text(size=12),
+        strip.text = element_text(size = 12),
+        legend.position = "none")
+SystemsSummary20k  
+#save summary figure
+ggsave("DruantiaIII_neighborhoods_Summary_20k_column.pdf",
+       plot=SystemsSummary20k,
+       path = "./figures/DruantiaIII_neighborhoods/",
+       width=35,
+       height = 25,
+       units="cm",
+       dpi=300)
+
+##########################
+##########################
+
+
+
+
 
 
 
