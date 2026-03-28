@@ -652,6 +652,7 @@ DomainRankingsByCladeNoNA<-DomainRankingsByClade  %>% drop_na()
 
 DomainRankingsByCladeWSize<-merge(DomainRankingsByCladeNoNA, DruEClusterSizes, by = "Cluster", all.x =T)
 
+
 DruEMostCommonDomainsByCladeList<-unique(subset(DomainRankingsByCladeWSize, 
                                                 DomainRankingsByCladeWSize$n > DomainRankingsByCladeWSize$ClSize*.4)$hmm_name)
 
