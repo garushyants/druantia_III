@@ -226,9 +226,18 @@ collapse_safe <- function(x) {
   if (length(x) == 0) NA_character_ else paste(x, collapse = ";")
 }
 
+collapse_safe_accessions <- function(x) {
+  x <- na.omit(x)
+  x <- unlist(strsplit(x, ";", fixed = TRUE))
+  x <- trimws(x)
+  x <- x[x != ""]
+  x <- sort(unique(x))
+  if (length(x) == 0) NA_character_ else paste(x, collapse = ";")
+}
+
 GenomadAnnoCollapsed<-GenomadAnnotationFull %>% group_by(V1) %>%
   summarise(
-    annotation_accessions        = collapse_safe(ANNOTATION_ACCESSIONS),
+    annotation_accessions        = collapse_safe_accessions(ANNOTATION_ACCESSIONS),
     annotation_descriptions      = collapse_safe(ANNOTATION_DESCRIPTION),
     genomad_hmm_ids               = collapse_safe(V2),
     genomad_specificity_class     = collapse_safe(SPECIFICITY_CLASS),
