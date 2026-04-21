@@ -190,9 +190,9 @@ ZorEWithDruall$Dru3<-ifelse(!is.na(ZorEWithDruall$Start.y),
                               "same genome"),
                               NA)
 ZorEWithDru<- ZorEWithDruall[,c(23,6,32)] %>% 
-  group_by(TreeRepresentative.x,Protein.x)%>%
+  group_by(TreeRepresentative.x,Protein.x) %>%
   summarise(
-    Dru3 = if (all(is.na(Dru3))) NA else first(sort(Dru3[!is.na(Dru3)])),
+    Dru3 = if (all(is.na(Dru3))) NA else dplyr::first(sort(Dru3[!is.na(Dru3)])),
     .groups = "drop"
   )
 ###############################
@@ -275,11 +275,11 @@ myclustercolors<-c("#a6cee3","#1f78b4","#b2df8a",
 names(myclustercolors)<-unique(DruE3ClusterAncestryNodeOfInterest$Cluster)
 
 DruEBasicTreePlot<-ggtree(DruETreeMidRoot,
-                      size=0.2,
-                      color="#636363")%<+% DruEBootstrapValuesA80 +
-  geom_nodepoint(aes(size = UFboot),
-                 color = '#4292c6',
-                 alpha=.3)+
+                      size=0.5,
+                      color="#525252") + #%<+% DruEBootstrapValuesA80 +
+  # geom_nodepoint(aes(size = UFboot),
+  #                color = '#4292c6',
+  #                alpha=.6)+
   scale_size_continuous(range = c(0.01,1))+
   geom_treescale(y=1, x=3.2, fontsize=3, linesize=0.7, offset=1)
 DruETreeWithCladesSimple<-DruEBasicTreePlot +
@@ -307,9 +307,7 @@ Connectionslong<-ConnectionsWithClades %>%
                values_to= "label")
 
 #####
-ZorETree<-ggtree(ZorETreeMidRoot,
-                 size=0.2,
-                 color="#636363") +
+ZorETree<-ggtree(ZorETreeMidRoot) +
   scale_size_continuous(range = c(0.01,1))
 
 Edata <- DruETreeWithCladesSimple$data
@@ -321,8 +319,8 @@ Zdata$x <- max(Zdata$x) - Zdata$x + max(Edata$x) + 1
 Zdata$y <- Zdata$y*(max(Edata$y)/max(Zdata$y))
 #Combine trees together
 TreesSideBySide <- DruETreeWithCladesSimple + geom_tree(data=Zdata,
-                                              size=0.2,
-                                              color="#636363") 
+                                              size=0.5,
+                                              color="#525252") 
 ##get coordinates for all tips on both trees
 dd <- bind_rows(Edata, Zdata) %>% 
   filter(!is.na(label))
@@ -332,7 +330,7 @@ ConnectionslongWithCoord<-merge(Connectionslong,
                                 ddtips, by = "label",all.x =T)
 
 DruEZorETree<-TreesSideBySide+ geom_line(aes(x, y, group=group, color=as.factor(Cluster)), ConnectionslongWithCoord,
-                           linewidth =.15)+
+                           linewidth =.4)+
   scale_color_manual(values=myclustercolors,name="Cluster")+
   guides(color = "none")
 DruEZorETree
@@ -340,8 +338,8 @@ DruEZorETree
 ggsave("ZorE_DruE_tree_with_connections.pdf",
        plot=DruEZorETree,
        path=FigDir,
-       width=40,
-       height=30,
+       width=30,
+       height=21,
        dpi=300,
        units="cm")
 

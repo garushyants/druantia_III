@@ -296,9 +296,9 @@ names(myclustercolors)<-unique(DruE3ClusterAncestryNodeOfInterest$Cluster)
 
 DrawCircularTreeWithData<-function(tree,clusternodes, bootstraps)
 {
-  tree<-DruE3TreeMidRoot
-  clusternodes<-DruE3ClusterAncestryNodeOfInterest
-  bootstraps<- DruE3BootstrapValuesA80
+  #tree<-DruE3TreeMidRoot
+  #clusternodes<-DruE3ClusterAncestryNodeOfInterest
+  #bootstraps<- DruE3BootstrapValuesA80
   BasicTreePlot<-ggtree(tree,layout = 'fan', open.angle=10, 
                     size=0.2,
                     color="#636363")%<+% bootstraps +
